@@ -1,0 +1,279 @@
+"""
+Data Manager Module
+Handles data downloading and management for Qlib
+"""
+import os
+import json
+import logging
+import shutil
+import stat
+import tarfile
+import tempfile
+from datetime import datetime
+from typing import Dict, Optional, Any
+from urllib.request import urlretrieve
+
+logger = logging.getLogger(__name__)
+
+# Data download URL
+QLIB_DATA_URL = "https://github.com/chenditc/investment_data/releases/latest/download/qlib_bin.tar.gz"
+DEFAULT_CN_DATA_PATH = "/app/data/stock/cn_data"
+
+
+class DataManager:
+    """Manager class for Qlib data operations."""
+    
+    def __init__(self, data_path: str = None):
+        """
+        Initialize the DataManager.
+        
+        Args:
+            data_path: Path to qlib data directory
+        """
+        self.data_path = data_path or os.environ.get('QLIB_DATA_PATH', DEFAULT_CN_DATA_PATH)
+        self.status_file = os.path.join(os.path.dirname(self.data_path), 'data_status.json')
+        
+        # Ensure directory exists
+        os.makedirs(self.data_path, exist_ok=True)
+    
+    def download_data(self, region: str = "cn", interval: str = "day") -> Dict[str, Any]:
+        """
+        Download qlib data from GitHub releases.
+        Downloads from: https://github.com/chenditc/investment_data/releases/latest/download/qlib_bin.tar.gz
+        Extracts to: /app/data/stock/cn_data (overrides existing data)
+        
+        Args:
+            region: Data region (cn for China, us for US)
+            interval: Data interval (day, 1min, etc.)
+            
+        Returns:
+            Dictionary containing download status
+        """
+        result = {
+            'start_time': datetime.now().isoformat(),
+            'region': region,
+            'interval': interval,
+            'status': 'running',
+            'url': QLIB_DATA_URL,
+            'target_path': self.data_path
+        }
+        
+        try:
+            logger.info(f"Starting data download from: {QLIB_DATA_URL}")
+            logger.info(f"Target directory: {self.data_path}")
+            
+            # Create a temporary file for the download
+            with tempfile.NamedTemporaryFile(suffix='.tar.gz', delete=False) as tmp_file:
+                tmp_path = tmp_file.name
+            
+            try:
+                # Download the file
+                logger.info("Downloading qlib_bin.tar.gz...")
+                urlretrieve(QLIB_DATA_URL, tmp_path)
+                logger.info(f"Download completed. File size: {os.path.getsize(tmp_path)} bytes")
+                
+                # Remove existing data directory to override
+                if os.path.exists(self.data_path):
+                    logger.info(f"Removing existing data at: {self.data_path}")
+                    shutil.rmtree(self.data_path)
+                
+                # Create parent directory
+                os.makedirs(os.path.dirname(self.data_path), exist_ok=True)
+                
+                # Extract the tar.gz file
+                logger.info(f"Extracting to: {self.data_path}")
+                with tarfile.open(tmp_path, 'r:gz') as tar:
+                    # Extract to parent directory, the archive should contain the data folder
+                    extract_path = os.path.dirname(self.data_path)
+                    tar.extractall(path=extract_path)
+                
+                # Check if extraction created a nested folder and move if needed
+                extracted_items = os.listdir(os.path.dirname(self.data_path))
+                if 'qlib_bin' in extracted_items and not os.path.exists(self.data_path):
+                    # Rename qlib_bin to cn_data
+                    qlib_bin_path = os.path.join(os.path.dirname(self.data_path), 'qlib_bin')
+                    shutil.move(qlib_bin_path, self.data_path)
+                
+                # Make data readable for everyone (chmod -R a+r)
+                self._make_readable(self.data_path)
+                
+                result['status'] = 'completed'
+                result['message'] = 'Data downloaded and extracted successfully'
+                result['end_time'] = datetime.now().isoformat()
+                
+                # Count files
+                file_count = sum(len(files) for _, _, files in os.walk(self.data_path))
+                result['files_count'] = file_count
+                logger.info(f"Extraction completed. Total files: {file_count}")
+                
+            finally:
+                # Clean up temporary file
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                    logger.info("Cleaned up temporary download file")
+            
+        except Exception as e:
+            result['status'] = 'failed'
+            result['message'] = str(e)
+            result['end_time'] = datetime.now().isoformat()
+            logger.error(f"Data download failed: {e}")
+        
+        # Update status file
+        self._update_status(result)
+        
+        return result
+    
+    def _make_readable(self, path: str):
+        """
+        Make all files and directories readable for everyone.
+        
+        Args:
+            path: Path to make readable recursively
+        """
+        logger.info(f"Setting read permissions for: {path}")
+        
+        for root, dirs, files in os.walk(path):
+            # Make directories readable and executable for everyone
+            for d in dirs:
+                dir_path = os.path.join(root, d)
+                try:
+                    current_mode = os.stat(dir_path).st_mode
+                    # Add read and execute for all (a+rx)
+                    new_mode = current_mode | stat.S_IROTH | stat.S_IXOTH | stat.S_IRGRP | stat.S_IXGRP
+                    os.chmod(dir_path, new_mode)
+                except Exception as e:
+                    logger.warning(f"Failed to set permissions on {dir_path}: {e}")
+            
+            # Make files readable for everyone
+            for f in files:
+                file_path = os.path.join(root, f)
+                try:
+                    current_mode = os.stat(file_path).st_mode
+                    # Add read for all (a+r)
+                    new_mode = current_mode | stat.S_IROTH | stat.S_IRGRP
+                    os.chmod(file_path, new_mode)
+                except Exception as e:
+                    logger.warning(f"Failed to set permissions on {file_path}: {e}")
+        
+        # Also set permissions on the root path itself
+        try:
+            current_mode = os.stat(path).st_mode
+            new_mode = current_mode | stat.S_IROTH | stat.S_IXOTH | stat.S_IRGRP | stat.S_IXGRP
+            os.chmod(path, new_mode)
+        except Exception as e:
+            logger.warning(f"Failed to set permissions on {path}: {e}")
+        
+        logger.info("Permissions set successfully")
+    
+    def download_cn1500_data(self) -> Dict[str, Any]:
+        """
+        Download Chinese CSI 1500 constituent data.
+        
+        Returns:
+            Dictionary containing download status
+        """
+        return self.download_data(region="cn", interval="day")
+    
+    def get_data_status(self) -> Dict[str, Any]:
+        """
+        Get current data status.
+        
+        Returns:
+            Dictionary containing data status information
+        """
+        status = {
+            'status': 'unknown',
+            'data_path': self.data_path,
+            'exists': os.path.exists(self.data_path),
+            'files_count': 0,
+            'record_count': 0
+        }
+        
+        # Check if data directory exists and has files
+        if os.path.exists(self.data_path):
+            files = []
+            for root, dirs, filenames in os.walk(self.data_path):
+                files.extend(filenames)
+            
+            status['files_count'] = len(files)
+            status['status'] = 'available' if files else 'empty'
+            
+            # Try to get more detailed status
+            if os.path.exists(self.status_file):
+                try:
+                    with open(self.status_file, 'r') as f:
+                        saved_status = json.load(f)
+                        status.update(saved_status)
+                except (json.JSONDecodeError, IOError):
+                    pass
+        else:
+            status['status'] = 'not_initialized'
+        
+        return status
+    
+    def get_last_update_time(self) -> Optional[str]:
+        """
+        Get the last data update time.
+        
+        Returns:
+            ISO format timestamp or None
+        """
+        if os.path.exists(self.status_file):
+            try:
+                with open(self.status_file, 'r') as f:
+                    status = json.load(f)
+                    return status.get('end_time')
+            except (json.JSONDecodeError, IOError):
+                pass
+        return None
+    
+    def _update_status(self, status: Dict[str, Any]):
+        """Update status file with latest information."""
+        try:
+            with open(self.status_file, 'w') as f:
+                json.dump(status, f, indent=2)
+        except IOError as e:
+            logger.error(f"Failed to update status file: {e}")
+    
+    def validate_data(self) -> Dict[str, Any]:
+        """
+        Validate the downloaded data.
+        
+        Returns:
+            Dictionary containing validation results
+        """
+        result = {
+            'valid': False,
+            'checks': []
+        }
+        
+        # Check if data directory exists
+        if not os.path.exists(self.data_path):
+            result['checks'].append({
+                'name': 'data_directory',
+                'passed': False,
+                'message': 'Data directory does not exist'
+            })
+            return result
+        
+        result['checks'].append({
+            'name': 'data_directory',
+            'passed': True,
+            'message': 'Data directory exists'
+        })
+        
+        # Check for required files/directories
+        required_paths = ['calendars', 'instruments', 'features']
+        for path in required_paths:
+            full_path = os.path.join(self.data_path, path)
+            exists = os.path.exists(full_path)
+            result['checks'].append({
+                'name': path,
+                'passed': exists,
+                'message': f'{path} {"exists" if exists else "missing"}'
+            })
+        
+        # Check overall validity
+        result['valid'] = all(check['passed'] for check in result['checks'])
+        
+        return result

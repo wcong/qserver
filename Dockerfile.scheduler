@@ -1,0 +1,45 @@
+# Scheduler Dockerfile
+# Dedicated container for running scheduled tasks
+
+FROM python:3.10-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    QLIB_DATA_PATH=/app/data/stock/cn_data \
+    MODEL_OUTPUT_PATH=/app/data/models \
+    TRAIN_OUTPUT_PATH=/app/data/train
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    g++ \
+    cron \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create working directory
+WORKDIR /app
+
+# Copy requirements and install
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Create necessary directories
+RUN mkdir -p /app/data/stock/cn_data \
+    /app/data/models \
+    /app/data/train \
+    /app/data/logs
+
+# Setup cron job
+COPY cron/crontab /etc/cron.d/qserver-cron
+RUN chmod 0644 /etc/cron.d/qserver-cron \
+    && crontab /etc/cron.d/qserver-cron \
+    && touch /var/log/cron.log
+
+# Run cron in foreground
+CMD ["cron", "-f"]

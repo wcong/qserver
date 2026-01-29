@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block title %}QServer - Home{% endblock %}
+
+{% block content %}
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="jumbotron bg-white p-5 rounded">
+            <h1 class="display-4">Welcome to QServer</h1>
+            <p class="lead">A comprehensive platform for quantitative trading model training using Qlib.</p>
+            <hr class="my-4">
+            <p>QServer provides automated data downloading, model training, and result visualization for your quantitative trading strategies.</p>
+            <a class="btn btn-primary btn-lg" href="/dashboard" role="button">
+                <i class="bi bi-speedometer2"></i> Go to Dashboard
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="bi bi-download text-primary"></i> Automated Data Download
+                </h5>
+                <p class="card-text">Daily cron job automatically downloads the latest market data to keep your models up-to-date.</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="bi bi-cpu text-success"></i> Model Training
+                </h5>
+                <p class="card-text">Train quantitative models using Microsoft's Qlib framework with various algorithms.</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="bi bi-bar-chart text-info"></i> Result Visualization
+                </h5>
+                <p class="card-text">View training results, model performance, and backtest metrics in an intuitive dashboard.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Quick Actions</h5>
+            </div>
+            <div class="card-body">
+                <button class="btn btn-outline-primary me-2" onclick="downloadData()">
+                    <i class="bi bi-cloud-download"></i> Download Data Now
+                </button>
+                <button class="btn btn-outline-success me-2" onclick="startTraining()">
+                    <i class="bi bi-play-circle"></i> Start Training
+                </button>
+                <button class="btn btn-outline-info" onclick="checkStatus()">
+                    <i class="bi bi-info-circle"></i> Check Status
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="status-message" class="row mt-3" style="display: none;">
+    <div class="col-12">
+        <div class="alert" role="alert" id="alert-box"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function showMessage(message, type) {
+    const statusDiv = document.getElementById('status-message');
+    const alertBox = document.getElementById('alert-box');
+    alertBox.className = `alert alert-${type}`;
+    alertBox.textContent = message;
+    statusDiv.style.display = 'block';
+    setTimeout(() => {
+        statusDiv.style.display = 'none';
+    }, 5000);
+}
+
+async function downloadData() {
+    try {
+        const response = await fetch('/api/data/download', { method: 'POST' });
+        const data = await response.json();
+        showMessage(data.message, data.status === 'success' ? 'success' : 'danger');
+    } catch (error) {
+        showMessage('Error: ' + error.message, 'danger');
+    }
+}
+
+async function startTraining() {
+    try {
+        const response = await fetch('/api/train', { method: 'POST' });
+        const data = await response.json();
+        showMessage(data.message, data.status === 'success' ? 'success' : 'danger');
+    } catch (error) {
+        showMessage('Error: ' + error.message, 'danger');
+    }
+}
+
+async function checkStatus() {
+    try {
+        const response = await fetch('/api/data/status');
+        const data = await response.json();
+        if (data.status === 'success') {
+            showMessage(`Data Status: ${JSON.stringify(data.data)}`, 'info');
+        } else {
+            showMessage(data.message, 'danger');
+        }
+    } catch (error) {
+        showMessage('Error: ' + error.message, 'danger');
+    }
+}
+</script>
+{% endblock %}

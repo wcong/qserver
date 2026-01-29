@@ -1,0 +1,76 @@
+# QServer Docker Compose Configuration
+# Run the entire qserver stack with: docker-compose up -d
+
+version: '3.8'
+
+services:
+  # Main web server
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: qserver-web
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=true
+      - SECRET_KEY=your-secret-key-change-in-production
+      - QLIB_DATA_PATH=/app/data/stock/cn_data
+      - MODEL_OUTPUT_PATH=/app/data/models
+      - TRAIN_OUTPUT_PATH=/app/data/train
+    volumes:
+      # Mount data directory for persistence
+      - qserver-data:/app/data
+      # Mount source code for development (optional, remove in production)
+      - ./app:/app/app:ro
+      - ./qlib_module:/app/qlib_module:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - qserver-network
+
+  # Scheduler service for cron jobs (alternative to embedded cron)
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.scheduler
+    container_name: qserver-scheduler
+    environment:
+      - QLIB_DATA_PATH=/app/data/stock/cn_data
+      - MODEL_OUTPUT_PATH=/app/data/models
+      - TRAIN_OUTPUT_PATH=/app/data/train
+    volumes:
+      - qserver-data:/app/data
+    restart: unless-stopped
+    depends_on:
+      - web
+    networks:
+      - qserver-network
+
+  # Redis for task queue (optional, for future scaling)
+  redis:
+    image: redis:7-alpine
+    container_name: qserver-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - qserver-network
+
+volumes:
+  qserver-data:
+    driver: local
+  redis-data:
+    driver: local
+
+networks:
+  qserver-network:
+    driver: bridge

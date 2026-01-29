@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+
+{% block title %}QServer - Dashboard{% endblock %}
+
+{% block content %}
+<div class="row mt-4">
+    <div class="col-12">
+        <h2><i class="bi bi-speedometer2"></i> Dashboard</h2>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <div class="col-md-3">
+        <div class="card bg-primary text-white">
+            <div class="card-body">
+                <h6 class="card-title">Data Status</h6>
+                <h3>{{ data_status.status if data_status else 'Unknown' }}</h3>
+                <small>Last Update: {{ last_update if last_update else 'Never' }}</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-success text-white">
+            <div class="card-body">
+                <h6 class="card-title">Models Trained</h6>
+                <h3 id="model-count">{{ training_history|length if training_history else 0 }}</h3>
+                <small>Total models available</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-info text-white">
+            <div class="card-body">
+                <h6 class="card-title">Data Records</h6>
+                <h3>{{ data_status.record_count if data_status and data_status.record_count else 'N/A' }}</h3>
+                <small>Total records in database</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-warning text-white">
+            <div class="card-body">
+                <h6 class="card-title">Cron Status</h6>
+                <h3>Active</h3>
+                <small>Daily at 00:00 UTC</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-graph-up"></i> Training History</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="trainingChart" height="100"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-gear"></i> Actions</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <button class="btn btn-primary" onclick="startTraining()">
+                        <i class="bi bi-play-circle"></i> Start New Training
+                    </button>
+                    <button class="btn btn-outline-primary" onclick="downloadData()">
+                        <i class="bi bi-cloud-download"></i> Download Latest Data
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="refreshDashboard()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh Dashboard
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-list-ul"></i> Recent Training Runs</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Model Type</th>
+                            <th>Start Time</th>
+                            <th>Status</th>
+                            <th>Metrics</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="training-table-body">
+                        {% if training_history %}
+                            {% for run in training_history %}
+                            <tr>
+                                <td>{{ run.id }}</td>
+                                <td>{{ run.model_type }}</td>
+                                <td>{{ run.start_time }}</td>
+                                <td>
+                                    <span class="badge bg-{{ 'success' if run.status == 'completed' else 'warning' }}">
+                                        {{ run.status }}
+                                    </span>
+                                </td>
+                                <td>{{ run.metrics if run.metrics else 'N/A' }}</td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-info">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center text-muted">No training runs yet</td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="status-message" class="row mt-3" style="display: none;">
+    <div class="col-12">
+        <div class="alert" role="alert" id="alert-box"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Initialize chart
+const ctx = document.getElementById('trainingChart').getContext('2d');
+const trainingChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+        labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+        datasets: [{
+            label: 'Model Performance (IC)',
+            data: [0.05, 0.06, 0.055, 0.07, 0.065, 0.08],
+            borderColor: 'rgb(75, 192, 192)',
+            tension: 0.1
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            legend: {
+                position: 'top',
+            }
+        }
+    }
+});
+
+function showMessage(message, type) {
+    const statusDiv = document.getElementById('status-message');
+    const alertBox = document.getElementById('alert-box');
+    alertBox.className = `alert alert-${type}`;
+    alertBox.textContent = message;
+    statusDiv.style.display = 'block';
+    setTimeout(() => {
+        statusDiv.style.display = 'none';
+    }, 5000);
+}
+
+async function downloadData() {
+    try {
+        const response = await fetch('/api/data/download', { method: 'POST' });
+        const data = await response.json();
+        showMessage(data.message, data.status === 'success' ? 'success' : 'danger');
+    } catch (error) {
+        showMessage('Error: ' + error.message, 'danger');
+    }
+}
+
+async function startTraining() {
+    try {
+        showMessage('Training started...', 'info');
+        const response = await fetch('/api/train', { method: 'POST' });
+        const data = await response.json();
+        showMessage(data.message, data.status === 'success' ? 'success' : 'danger');
+    } catch (error) {
+        showMessage('Error: ' + error.message, 'danger');
+    }
+}
+
+function refreshDashboard() {
+    location.reload();
+}
+</script>
+{% endblock %}

@@ -1,0 +1,10 @@
+# Cron configuration for QServer
+# This file is used to configure cron jobs in the Docker container
+
+# Download data every day at 00:00 UTC (after market close)
+0 0 * * * root /usr/local/bin/python /app/cron/download_data.py >> /var/log/cron.log 2>&1
+
+# Train model every day at 02:00 UTC (after data download)
+0 2 * * * root /usr/local/bin/python /app/cron/train_model.py >> /var/log/cron.log 2>&1
+
+# Empty line required at end of cron file
