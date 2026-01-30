@@ -82,17 +82,35 @@ class DataManager:
                 
                 # Extract the tar.gz file
                 logger.info(f"Extracting to: {self.data_path}")
-                with tarfile.open(tmp_path, 'r:gz') as tar:
-                    # Extract to parent directory, the archive should contain the data folder
-                    extract_path = os.path.dirname(self.data_path)
-                    tar.extractall(path=extract_path)
                 
-                # Check if extraction created a nested folder and move if needed
-                extracted_items = os.listdir(os.path.dirname(self.data_path))
-                if 'qlib_bin' in extracted_items and not os.path.exists(self.data_path):
-                    # Rename qlib_bin to cn_data
-                    qlib_bin_path = os.path.join(os.path.dirname(self.data_path), 'qlib_bin')
-                    shutil.move(qlib_bin_path, self.data_path)
+                # Use a temporary extraction directory
+                extract_tmp = os.path.join(os.path.dirname(self.data_path), '_extract_tmp')
+                if os.path.exists(extract_tmp):
+                    shutil.rmtree(extract_tmp)
+                os.makedirs(extract_tmp, exist_ok=True)
+                
+                with tarfile.open(tmp_path, 'r:gz') as tar:
+                    tar.extractall(path=extract_tmp)
+                
+                # Check if extraction created a qlib_bin subfolder
+                extracted_items = os.listdir(extract_tmp)
+                if 'qlib_bin' in extracted_items:
+                    # Move contents FROM INSIDE qlib_bin to cn_data
+                    qlib_bin_path = os.path.join(extract_tmp, 'qlib_bin')
+                    os.makedirs(self.data_path, exist_ok=True)
+                    for item in os.listdir(qlib_bin_path):
+                        src = os.path.join(qlib_bin_path, item)
+                        dst = os.path.join(self.data_path, item)
+                        shutil.move(src, dst)
+                else:
+                    # Move contents directly to cn_data
+                    shutil.move(extract_tmp, self.data_path)
+                
+                # Clean up temp extraction folder
+                if os.path.exists(extract_tmp):
+                    shutil.rmtree(extract_tmp)
+                
+                
                 
                 # Make data readable for everyone (chmod -R a+r)
                 self._make_readable(self.data_path)

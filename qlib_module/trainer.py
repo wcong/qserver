@@ -278,12 +278,15 @@ class QlibTrainer:
         with R.start(experiment_name=experiment_name):
             model.fit(dataset)
             
-            # Generate predictions
+            # Generate predictions using SignalRecord (saves to recorder artifacts)
             rec = SignalRecord(model, dataset, recorder=R.get_recorder())
             rec.generate()
             
             # Get metrics
             metrics = R.get_recorder().list_metrics()
+            
+            # Get predictions directly from model (SignalRecord saves to artifacts)
+            predictions = model.predict(dataset, segment="test")
         
         # Save model
         model_save_path = os.path.join(
@@ -299,7 +302,6 @@ class QlibTrainer:
             }, f)
         
         # Save predictions
-        predictions = rec.get_signal()
         pred_save_path = os.path.join(
             self.train_output_path, 'predictions',
             f"{model_name}_{training_id}_predictions.pkl"
@@ -496,6 +498,137 @@ class QlibTrainer:
         
         logger.info(f"Loaded model from: {model_path}")
         return data.get('model'), data.get('config')
+    
+    def predict_stocks(
+        self,
+        feature_set: FeatureSet,
+        model_type: ModelType,
+        horizon: PredictionHorizon,
+        stock_codes: List[str],
+        predict_date: str = None,
+        training_id: str = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Run predictions for a list of stocks using a trained model.
+        
+        Args:
+            feature_set: Feature set used for training
+            model_type: Model type
+            horizon: Prediction horizon
+            stock_codes: List of stock codes to predict
+            predict_date: Date to predict for (default: latest available)
+            training_id: Specific training ID (optional)
+            
+        Returns:
+            List of prediction dictionaries with stock_code and prediction
+        """
+        self._init_qlib()
+        
+        from qlib.data.dataset import DatasetH
+        from qlib.utils import init_instance_by_config
+        
+        # Load the trained model
+        model, config = self.load_trained_model(
+            feature_set=feature_set,
+            model_type=model_type,
+            horizon=horizon,
+            training_id=training_id,
+        )
+        
+        if model is None:
+            raise ValueError("Failed to load model")
+        
+        # Determine date range for prediction
+        # We need historical data to compute features
+        from datetime import datetime, timedelta
+        if predict_date:
+            end_date = predict_date
+        else:
+            end_date = datetime.now().strftime("%Y-%m-%d")
+        
+        # Need enough history for feature computation (at least 60 days for Alpha360)
+        start_date = (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=120)).strftime("%Y-%m-%d")
+        
+        # Create handler config for the specific stocks
+        handler_config = self._get_handler_config_for_stocks(
+            feature_set=feature_set,
+            horizon=horizon,
+            stock_codes=stock_codes,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        
+        # Create dataset for prediction
+        dataset_config = {
+            "class": "DatasetH",
+            "module_path": "qlib.data.dataset",
+            "kwargs": {
+                "handler": handler_config,
+                "segments": {
+                    "test": (start_date, end_date),
+                },
+            },
+        }
+        
+        dataset = init_instance_by_config(dataset_config)
+        
+        # Run prediction
+        predictions_series = model.predict(dataset, segment="test")
+        
+        # Get the latest predictions for each stock
+        if predictions_series is not None and len(predictions_series) > 0:
+            # Group by stock and get the latest prediction
+            latest_predictions = predictions_series.groupby(level='instrument').last()
+            
+            results = []
+            for stock_code in stock_codes:
+                if stock_code in latest_predictions.index:
+                    pred_value = float(latest_predictions[stock_code])
+                    results.append({
+                        'stock_code': stock_code,
+                        'prediction': pred_value,
+                    })
+                else:
+                    results.append({
+                        'stock_code': stock_code,
+                        'prediction': None,
+                        'error': 'No data available'
+                    })
+            
+            # Sort by prediction (descending)
+            results.sort(key=lambda x: x.get('prediction') or float('-inf'), reverse=True)
+            return results
+        else:
+            return [{'stock_code': code, 'prediction': None, 'error': 'Prediction failed'} for code in stock_codes]
+    
+    def _get_handler_config_for_stocks(
+        self,
+        feature_set: FeatureSet,
+        horizon: PredictionHorizon,
+        stock_codes: List[str],
+        start_date: str,
+        end_date: str,
+    ) -> Dict:
+        """Get handler configuration for specific stocks."""
+        label_expression = f"Ref($close, -{horizon.value})/Ref($close, -1) - 1"
+        
+        if feature_set == FeatureSet.ALPHA158:
+            handler_class = "Alpha158"
+        else:
+            handler_class = "Alpha360"
+        
+        return {
+            "class": handler_class,
+            "module_path": "qlib.contrib.data.handler",
+            "kwargs": {
+                "instruments": stock_codes,
+                "start_time": start_date,
+                "end_time": end_date,
+                "fit_start_time": start_date,
+                "fit_end_time": end_date,
+                "label": ([label_expression], ["LABEL0"]),
+            },
+        }
     
     def finetune_model(
         self,

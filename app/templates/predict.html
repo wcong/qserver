@@ -1,0 +1,321 @@
+{% extends "base.html" %}
+
+{% block title %}QServer - Stock Prediction{% endblock %}
+
+{% block content %}
+<div class="row mt-4">
+    <div class="col-12">
+        <h2><i class="bi bi-graph-up-arrow"></i> Stock Prediction</h2>
+        <p class="text-muted">Select a trained model and enter stock codes to get predictions</p>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <!-- Model Selection -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-cpu"></i> Select Model</h5>
+            </div>
+            <div class="card-body">
+                <form id="predict-form">
+                    <div class="mb-3">
+                        <label for="feature_set" class="form-label">Feature Set</label>
+                        <select class="form-select" id="feature_set" name="feature_set" required>
+                            {% for fs in feature_sets %}
+                            <option value="{{ fs }}">{{ fs }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="model_type" class="form-label">Model Type</label>
+                        <select class="form-select" id="model_type" name="model_type" required>
+                            {% for mt in model_types %}
+                            <option value="{{ mt }}">{{ mt }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="horizon" class="form-label">Prediction Horizon</label>
+                        <select class="form-select" id="horizon" name="horizon" required>
+                            {% for h in horizons %}
+                            <option value="{{ h }}">{{ h }} day(s)</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="predict_date" class="form-label">Prediction Date</label>
+                        <input type="date" class="form-control" id="predict_date" name="predict_date" 
+                               value="{{ today }}" required>
+                        <small class="text-muted">Date to generate predictions for</small>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Stock List Input -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-list-ul"></i> Stock Codes</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="stock_codes" class="form-label">Enter Stock Codes</label>
+                    <textarea class="form-control" id="stock_codes" name="stock_codes" rows="10" 
+                              placeholder="Enter stock codes, one per line&#10;e.g.&#10;SZ002594&#10;SH600000&#10;SH601318"></textarea>
+                    <small class="text-muted">One stock code per line. Format: SH/SZ + code (e.g., SH600000)</small>
+                </div>
+                
+                <div class="d-grid gap-2">
+                    <button type="button" class="btn btn-primary" id="predict-btn" onclick="runPrediction()">
+                        <i class="bi bi-play-fill"></i> Run Prediction
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" onclick="clearStocks()">
+                        <i class="bi bi-trash"></i> Clear
+                    </button>
+                </div>
+                
+                <hr>
+                <h6>Quick Add</h6>
+                <div class="btn-group-vertical w-100" role="group">
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="addSampleStocks('popular')">
+                        Popular Stocks
+                    </button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="addSampleStocks('tech')">
+                        Tech Stocks
+                    </button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="addSampleStocks('finance')">
+                        Finance Stocks
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Results -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Predictions</h5>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="exportResults()" id="export-btn" disabled>
+                    <i class="bi bi-download"></i> Export
+                </button>
+            </div>
+            <div class="card-body">
+                <div id="loading" class="text-center d-none">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Running predictions...</p>
+                </div>
+                
+                <div id="results-container">
+                    <p class="text-muted text-center">Results will appear here</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Results Table (Full Width) -->
+<div class="row mt-3" id="results-table-row" style="display: none;">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-table"></i> Detailed Results</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover" id="results-table">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Stock Code</th>
+                                <th>Predicted Return</th>
+                                <th>Signal</th>
+                                <th>Confidence</th>
+                            </tr>
+                        </thead>
+                        <tbody id="results-tbody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const sampleStocks = {
+    'popular': ['SH600519', 'SZ000858', 'SH601318', 'SZ002594', 'SH600036'],
+    'tech': ['SZ000725', 'SH688981', 'SZ002415', 'SH603986', 'SZ300750'],
+    'finance': ['SH601318', 'SH600036', 'SH601166', 'SH600000', 'SH601398']
+};
+
+let predictionResults = [];
+
+function addSampleStocks(category) {
+    const textarea = document.getElementById('stock_codes');
+    const stocks = sampleStocks[category] || [];
+    const current = textarea.value.trim();
+    if (current) {
+        textarea.value = current + '\n' + stocks.join('\n');
+    } else {
+        textarea.value = stocks.join('\n');
+    }
+}
+
+function clearStocks() {
+    document.getElementById('stock_codes').value = '';
+    document.getElementById('results-container').innerHTML = '<p class="text-muted text-center">Results will appear here</p>';
+    document.getElementById('results-table-row').style.display = 'none';
+    document.getElementById('export-btn').disabled = true;
+    predictionResults = [];
+}
+
+async function runPrediction() {
+    const btn = document.getElementById('predict-btn');
+    const loading = document.getElementById('loading');
+    const resultsContainer = document.getElementById('results-container');
+    
+    // Get form values
+    const featureSet = document.getElementById('feature_set').value;
+    const modelType = document.getElementById('model_type').value;
+    const horizon = document.getElementById('horizon').value;
+    const predictDate = document.getElementById('predict_date').value;
+    const stockCodesText = document.getElementById('stock_codes').value.trim();
+    
+    if (!stockCodesText) {
+        alert('Please enter at least one stock code');
+        return;
+    }
+    
+    const stockCodes = stockCodesText.split('\n').map(s => s.trim()).filter(s => s);
+    
+    if (stockCodes.length === 0) {
+        alert('Please enter valid stock codes');
+        return;
+    }
+    
+    // Show loading
+    btn.disabled = true;
+    loading.classList.remove('d-none');
+    resultsContainer.innerHTML = '';
+    
+    try {
+        const response = await fetch('/api/predict', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                feature_set: featureSet,
+                model_type: modelType,
+                horizon: parseInt(horizon),
+                predict_date: predictDate,
+                stock_codes: stockCodes
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            displayResults(data.predictions, data.model_name);
+            predictionResults = data.predictions;
+            document.getElementById('export-btn').disabled = false;
+        } else {
+            resultsContainer.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle"></i> ${data.message}
+                </div>
+            `;
+        }
+    } catch (error) {
+        resultsContainer.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle"></i> Error: ${error.message}
+            </div>
+        `;
+    } finally {
+        btn.disabled = false;
+        loading.classList.add('d-none');
+    }
+}
+
+function displayResults(predictions, modelName) {
+    const resultsContainer = document.getElementById('results-container');
+    const resultsTableRow = document.getElementById('results-table-row');
+    const resultsTbody = document.getElementById('results-tbody');
+    
+    // Summary
+    const bullish = predictions.filter(p => p.prediction > 0).length;
+    const bearish = predictions.filter(p => p.prediction <= 0).length;
+    
+    resultsContainer.innerHTML = `
+        <div class="alert alert-success">
+            <strong>Model:</strong> ${modelName}<br>
+            <strong>Total Stocks:</strong> ${predictions.length}<br>
+            <strong>Bullish:</strong> <span class="text-success">${bullish}</span> | 
+            <strong>Bearish:</strong> <span class="text-danger">${bearish}</span>
+        </div>
+        <h6>Top Predictions</h6>
+        <ul class="list-group">
+            ${predictions.slice(0, 5).map(p => `
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    ${p.stock_code}
+                    <span class="badge ${p.prediction > 0 ? 'bg-success' : 'bg-danger'}">
+                        ${(p.prediction * 100).toFixed(2)}%
+                    </span>
+                </li>
+            `).join('')}
+        </ul>
+    `;
+    
+    // Detailed table
+    resultsTbody.innerHTML = predictions.map(p => {
+        const returnPct = (p.prediction * 100).toFixed(4);
+        const signal = p.prediction > 0.01 ? 'BUY' : (p.prediction < -0.01 ? 'SELL' : 'HOLD');
+        const signalClass = signal === 'BUY' ? 'success' : (signal === 'SELL' ? 'danger' : 'warning');
+        const confidence = Math.abs(p.prediction) > 0.05 ? 'High' : (Math.abs(p.prediction) > 0.02 ? 'Medium' : 'Low');
+        
+        return `
+            <tr>
+                <td><strong>${p.stock_code}</strong></td>
+                <td class="${p.prediction > 0 ? 'text-success' : 'text-danger'}">${returnPct}%</td>
+                <td><span class="badge bg-${signalClass}">${signal}</span></td>
+                <td>${confidence}</td>
+            </tr>
+        `;
+    }).join('');
+    
+    resultsTableRow.style.display = 'block';
+}
+
+function exportResults() {
+    if (predictionResults.length === 0) return;
+    
+    const csv = [
+        ['Stock Code', 'Predicted Return', 'Signal', 'Confidence'].join(','),
+        ...predictionResults.map(p => {
+            const signal = p.prediction > 0.01 ? 'BUY' : (p.prediction < -0.01 ? 'SELL' : 'HOLD');
+            const confidence = Math.abs(p.prediction) > 0.05 ? 'High' : (Math.abs(p.prediction) > 0.02 ? 'Medium' : 'Low');
+            return [p.stock_code, (p.prediction * 100).toFixed(4) + '%', signal, confidence].join(',');
+        })
+    ].join('\n');
+    
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `predictions_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+}
+</script>
+{% endblock %}

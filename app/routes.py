@@ -44,12 +44,77 @@ def dashboard():
     return render_template('dashboard.html', **context)
 
 
+@main_bp.route('/predict')
+def predict_page():
+    """Stock prediction page."""
+    from datetime import date
+    trainer = QlibTrainer()
+    
+    context = {
+        'models': trainer.list_models(),
+        'feature_sets': [fs.value for fs in FeatureSet],
+        'model_types': [mt.value for mt in ModelType],
+        'horizons': [h.value for h in PredictionHorizon],
+        'today': date.today().isoformat(),
+    }
+    return render_template('predict.html', **context)
+
+
+@main_bp.route('/api/predict', methods=['POST'])
+def run_prediction():
+    """API endpoint to run predictions for a list of stocks."""
+    try:
+        trainer = QlibTrainer()
+        data = request.get_json(force=True, silent=True) or {}
+        
+        # Get parameters
+        feature_set = FeatureSet(data.get('feature_set', 'alpha158'))
+        model_type = ModelType(data.get('model_type', 'lgbmodel'))
+        horizon = PredictionHorizon(int(data.get('horizon', 1)))
+        predict_date = data.get('predict_date')
+        stock_codes = data.get('stock_codes', [])
+        
+        if not stock_codes:
+            return jsonify({
+                'status': 'error',
+                'message': 'No stock codes provided'
+            }), 400
+        
+        # Run prediction
+        predictions = trainer.predict_stocks(
+            feature_set=feature_set,
+            model_type=model_type,
+            horizon=horizon,
+            stock_codes=stock_codes,
+            predict_date=predict_date,
+        )
+        
+        model_name = f"{feature_set.value}_{model_type.value}_horizon{horizon.value}"
+        
+        return jsonify({
+            'status': 'success',
+            'model_name': model_name,
+            'predictions': predictions,
+            'count': len(predictions)
+        })
+    except FileNotFoundError as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Model not found: {str(e)}'
+        }), 404
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
 @main_bp.route('/api/train', methods=['POST'])
 def start_training():
     """API endpoint to start model training for a specific configuration."""
     try:
         trainer = QlibTrainer()
-        data = request.get_json() or {}
+        data = request.get_json(force=True, silent=True) or {}
         
         # Get parameters from request
         feature_set = data.get('feature_set', 'alpha158')
@@ -100,7 +165,7 @@ def finetune_model():
     """API endpoint to finetune a trained model with newest data."""
     try:
         trainer = QlibTrainer()
-        data = request.get_json() or {}
+        data = request.get_json(force=True, silent=True) or {}
         
         # Get parameters from request
         feature_set = FeatureSet(data.get('feature_set', 'alpha158'))
@@ -133,7 +198,7 @@ def finetune_all_models():
     """API endpoint to finetune all trained models with newest data."""
     try:
         trainer = QlibTrainer()
-        data = request.get_json() or {}
+        data = request.get_json(force=True, silent=True) or {}
         
         result = trainer.finetune_all_models(
             finetune_start=data.get('finetune_start'),
@@ -209,7 +274,7 @@ def load_model():
     """API endpoint to load a trained model."""
     try:
         trainer = QlibTrainer()
-        data = request.get_json() or {}
+        data = request.get_json(force=True, silent=True) or {}
         
         feature_set = FeatureSet(data.get('feature_set', 'alpha158'))
         model_type = ModelType(data.get('model_type', 'lgbmodel'))

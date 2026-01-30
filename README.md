@@ -62,7 +62,36 @@ qserver/
 
 4. Access the web interface at http://localhost:5000
 
-### Local Development
+### Local Development (Conda)
+
+1. Create a conda environment:
+   ```bash
+   conda create -n qserver python=3.10
+   conda activate qserver
+   ```
+
+2. Install dependencies:
+   ```bash
+   # Install core packages via conda (recommended for better compatibility)
+   conda install -c conda-forge numpy pandas scipy scikit-learn lightgbm xgboost
+
+   # Install remaining packages via pip
+   pip install -r requirements.txt
+   ```
+
+3. Set environment variables:
+   ```bash
+   export FLASK_APP=run.py
+   export FLASK_ENV=development
+   ```
+
+4. Run the application:
+   ```bash
+   flask run
+   # Or: python run.py
+   ```
+
+### Local Development (venv)
 
 1. Create a virtual environment:
    ```bash

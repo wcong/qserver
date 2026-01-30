@@ -3,6 +3,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# qserver local run test
+data/
+workspace/
+mlruns/
+
 # C extensions
 *.so
 
