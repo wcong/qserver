@@ -1,0 +1,347 @@
+{% extends "base.html" %}
+
+{% block title %}QServer - Train Model{% endblock %}
+
+{% block content %}
+<div class="row mt-4">
+    <div class="col-12">
+        <h2><i class="bi bi-gear-fill"></i> Train Model</h2>
+        <p class="text-muted">Configure and train a new model</p>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <!-- Training Configuration -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-sliders"></i> Training Configuration</h5>
+            </div>
+            <div class="card-body">
+                <form id="train-form">
+                    <div class="mb-3">
+                        <label for="feature_set" class="form-label">Feature Set</label>
+                        <select class="form-select" id="feature_set" name="feature_set" required>
+                            {% for fs in feature_sets %}
+                            <option value="{{ fs }}">{{ fs }}</option>
+                            {% endfor %}
+                        </select>
+                        <small class="text-muted">
+                            Alpha158: 158 technical indicators<br>
+                            Alpha360: 6 price features × 60 days
+                        </small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="model_type" class="form-label">Model Type</label>
+                        <select class="form-select" id="model_type" name="model_type" required>
+                            {% for mt in model_types %}
+                            <option value="{{ mt }}">{{ mt }}</option>
+                            {% endfor %}
+                        </select>
+                        <small class="text-muted">
+                            LGBModel: LightGBM (fast, good for tabular)<br>
+                            Transformer: Deep learning (better for sequences)
+                        </small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="horizon" class="form-label">Prediction Horizon</label>
+                        <select class="form-select" id="horizon" name="horizon" required>
+                            {% for h in horizons %}
+                            <option value="{{ h.value }}">{{ h.name }} ({{ h.value }} day{% if h.value > 1 %}s{% endif %})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="market" class="form-label">Market / Stock Pool</label>
+                        <select class="form-select" id="market" name="market">
+                            <option value="csi300" selected>CSI 300</option>
+                            <option value="csi500">CSI 500</option>
+                            <option value="all">All Stocks</option>
+                        </select>
+                    </div>
+                    
+                    <hr>
+                    <h6>Date Configuration</h6>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="train_start" class="form-label">Train Start</label>
+                            <input type="date" class="form-control" id="train_start" name="train_start" value="2017-01-01">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="train_end" class="form-label">Train End</label>
+                            <input type="date" class="form-control" id="train_end" name="train_end" value="2022-12-31">
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="valid_start" class="form-label">Valid Start</label>
+                            <input type="date" class="form-control" id="valid_start" name="valid_start" value="2023-01-01">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="valid_end" class="form-label">Valid End</label>
+                            <input type="date" class="form-control" id="valid_end" name="valid_end" value="2023-06-30">
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="test_start" class="form-label">Test Start</label>
+                            <input type="date" class="form-control" id="test_start" name="test_start" value="2023-07-01">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="test_end" class="form-label">Test End</label>
+                            <input type="date" class="form-control" id="test_end" name="test_end" value="2024-12-31">
+                        </div>
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        <button type="button" class="btn btn-primary btn-lg" id="train-btn" onclick="startTraining()">
+                            <i class="bi bi-play-fill"></i> Start Training
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" onclick="trainAllModels()">
+                            <i class="bi bi-collection-fill"></i> Train All Combinations
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Training Status & History -->
+    <div class="col-md-6">
+        <div class="card mb-3">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-activity"></i> Training Status</h5>
+            </div>
+            <div class="card-body">
+                <div id="training-status">
+                    <p class="text-muted text-center">No training in progress</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-clock-history"></i> Trained Models</h5>
+                <button class="btn btn-sm btn-outline-primary" onclick="refreshModels()">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+            </div>
+            <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                <div id="models-list">
+                    {% if models %}
+                    <ul class="list-group">
+                        {% for model in models %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong>{{ model.name }}</strong>
+                                <br><small class="text-muted">{{ model.timestamp if model.timestamp else 'N/A' }}</small>
+                            </div>
+                            <span class="badge bg-success">Trained</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                    <p class="text-muted text-center">No models trained yet</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Training Log -->
+<div class="row mt-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-terminal"></i> Training Log</h5>
+            </div>
+            <div class="card-body">
+                <pre id="training-log" class="bg-dark text-light p-3" style="max-height: 300px; overflow-y: auto; font-size: 0.85rem;">Waiting for training to start...</pre>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let trainingInProgress = false;
+
+async function startTraining() {
+    if (trainingInProgress) {
+        alert('Training already in progress');
+        return;
+    }
+    
+    const btn = document.getElementById('train-btn');
+    const statusDiv = document.getElementById('training-status');
+    const logPre = document.getElementById('training-log');
+    
+    const formData = {
+        feature_set: document.getElementById('feature_set').value,
+        model_type: document.getElementById('model_type').value,
+        horizon: parseInt(document.getElementById('horizon').value),
+        market: document.getElementById('market').value,
+        train_start: document.getElementById('train_start').value,
+        train_end: document.getElementById('train_end').value,
+        valid_start: document.getElementById('valid_start').value,
+        valid_end: document.getElementById('valid_end').value,
+        test_start: document.getElementById('test_start').value,
+        test_end: document.getElementById('test_end').value,
+    };
+    
+    const modelName = `${formData.feature_set}_${formData.model_type}_horizon${formData.horizon}`;
+    
+    trainingInProgress = true;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Training...';
+    
+    statusDiv.innerHTML = `
+        <div class="alert alert-info">
+            <div class="d-flex align-items-center">
+                <div class="spinner-border spinner-border-sm me-2"></div>
+                <div>Training <strong>${modelName}</strong>...</div>
+            </div>
+        </div>
+    `;
+    
+    logPre.textContent = `[${new Date().toISOString()}] Starting training for ${modelName}...\n`;
+    
+    try {
+        const response = await fetch('/api/train', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formData)
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            statusDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <i class="bi bi-check-circle"></i> Training completed for <strong>${modelName}</strong>
+                </div>
+            `;
+            logPre.textContent += `[${new Date().toISOString()}] Training completed successfully!\n`;
+            logPre.textContent += JSON.stringify(data.result, null, 2);
+            refreshModels();
+        } else {
+            statusDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-x-circle"></i> Training failed: ${data.message}
+                </div>
+            `;
+            logPre.textContent += `[${new Date().toISOString()}] Error: ${data.message}\n`;
+        }
+    } catch (error) {
+        statusDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle"></i> Error: ${error.message}
+            </div>
+        `;
+        logPre.textContent += `[${new Date().toISOString()}] Error: ${error.message}\n`;
+    } finally {
+        trainingInProgress = false;
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-play-fill"></i> Start Training';
+    }
+}
+
+async function trainAllModels() {
+    if (trainingInProgress) {
+        alert('Training already in progress');
+        return;
+    }
+    
+    if (!confirm('This will train all model combinations. This may take a long time. Continue?')) {
+        return;
+    }
+    
+    const statusDiv = document.getElementById('training-status');
+    const logPre = document.getElementById('training-log');
+    
+    trainingInProgress = true;
+    
+    statusDiv.innerHTML = `
+        <div class="alert alert-info">
+            <div class="d-flex align-items-center">
+                <div class="spinner-border spinner-border-sm me-2"></div>
+                <div>Training all model combinations...</div>
+            </div>
+        </div>
+    `;
+    
+    logPre.textContent = `[${new Date().toISOString()}] Starting training for all models...\n`;
+    
+    try {
+        const response = await fetch('/api/train/all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            statusDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <i class="bi bi-check-circle"></i> All models trained successfully
+                </div>
+            `;
+            logPre.textContent += `[${new Date().toISOString()}] Training completed!\n`;
+            logPre.textContent += JSON.stringify(data.result, null, 2);
+            refreshModels();
+        } else {
+            statusDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-x-circle"></i> Training failed: ${data.message}
+                </div>
+            `;
+        }
+    } catch (error) {
+        statusDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle"></i> Error: ${error.message}
+            </div>
+        `;
+    } finally {
+        trainingInProgress = false;
+    }
+}
+
+async function refreshModels() {
+    try {
+        const response = await fetch('/api/models');
+        const data = await response.json();
+        
+        const modelsDiv = document.getElementById('models-list');
+        
+        if (data.status === 'success' && data.models.length > 0) {
+            modelsDiv.innerHTML = `
+                <ul class="list-group">
+                    ${data.models.map(model => `
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong>${model.name}</strong>
+                                <br><small class="text-muted">${model.timestamp || 'N/A'}</small>
+                            </div>
+                            <span class="badge bg-success">Trained</span>
+                        </li>
+                    `).join('')}
+                </ul>
+            `;
+        } else {
+            modelsDiv.innerHTML = '<p class="text-muted text-center">No models trained yet</p>';
+        }
+    } catch (error) {
+        console.error('Failed to refresh models:', error);
+    }
+}
+</script>
+{% endblock %}

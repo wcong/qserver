@@ -60,6 +60,56 @@ def predict_page():
     return render_template('predict.html', **context)
 
 
+@main_bp.route('/train')
+def train_page():
+    """Model training page."""
+    trainer = QlibTrainer()
+    
+    context = {
+        'models': trainer.list_models(),
+        'feature_sets': [fs.value for fs in FeatureSet],
+        'model_types': [mt.value for mt in ModelType],
+        'horizons': [{'value': h.value, 'name': h.name} for h in PredictionHorizon],
+    }
+    return render_template('train.html', **context)
+
+
+@main_bp.route('/finetune')
+def finetune_page():
+    """Model finetuning page."""
+    from datetime import date, timedelta
+    trainer = QlibTrainer()
+    
+    # Default finetune period: last 3 months
+    today = date.today()
+    finetune_end = today.isoformat()
+    finetune_start = (today - timedelta(days=90)).isoformat()
+    
+    # Get models with parsed info
+    models = trainer.list_models()
+    for model in models:
+        # Parse model name to extract feature_set, model_type, horizon
+        # Format: feature_set_model_type_horizonN
+        parts = model.get('name', '').split('_')
+        if len(parts) >= 3:
+            model['feature_set'] = parts[0]
+            model['model_type'] = parts[1]
+            # Extract horizon number from 'horizonN'
+            horizon_part = parts[2] if len(parts) > 2 else 'horizon1'
+            model['horizon'] = int(horizon_part.replace('horizon', '')) if 'horizon' in horizon_part else 1
+    
+    # Get finetuned models history
+    finetuned_models = trainer.get_finetuned_models() if hasattr(trainer, 'get_finetuned_models') else []
+    
+    context = {
+        'models': models,
+        'finetuned_models': finetuned_models,
+        'finetune_start': finetune_start,
+        'finetune_end': finetune_end,
+    }
+    return render_template('finetune.html', **context)
+
+
 @main_bp.route('/api/predict', methods=['POST'])
 def run_prediction():
     """API endpoint to run predictions for a list of stocks."""
@@ -121,12 +171,18 @@ def start_training():
         model_type = data.get('model_type', 'lgbmodel')
         horizon = data.get('horizon', 1)
         
-        # Create config
+        # Create config with optional date parameters
         config = TrainingConfig(
             feature_set=FeatureSet(feature_set),
             model_type=ModelType(model_type),
             horizon=PredictionHorizon(int(horizon)),
             market=data.get('market', 'csi300'),
+            train_start=data.get('train_start', '2017-01-01'),
+            train_end=data.get('train_end', '2022-12-31'),
+            valid_start=data.get('valid_start', '2023-01-01'),
+            valid_end=data.get('valid_end', '2023-06-30'),
+            test_start=data.get('test_start', '2023-07-01'),
+            test_end=data.get('test_end', '2024-12-31'),
         )
         
         result = trainer.train_model(config)

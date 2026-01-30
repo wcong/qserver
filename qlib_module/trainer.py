@@ -344,6 +344,16 @@ class QlibTrainer:
         """
         label_expr = config.get_label_expression()
         
+        # Define processors for data handling
+        learn_processors = [
+            {"class": "DropnaLabel"},
+        ]
+        infer_processors = [
+            {"class": "ProcessInf", "kwargs": {}},
+            {"class": "ZScoreNorm", "kwargs": {}},
+            {"class": "Fillna", "kwargs": {}},
+        ]
+        
         if config.feature_set == FeatureSet.ALPHA158:
             return {
                 "class": "Alpha158",
@@ -354,7 +364,9 @@ class QlibTrainer:
                     "fit_start_time": config.train_start,
                     "fit_end_time": config.train_end,
                     "instruments": config.market,
-                    "label": [label_expr],
+                    "label": ([label_expr], ["LABEL0"]),
+                    "learn_processors": learn_processors,
+                    "infer_processors": infer_processors,
                 },
             }
         elif config.feature_set == FeatureSet.ALPHA360:
@@ -367,7 +379,9 @@ class QlibTrainer:
                     "fit_start_time": config.train_start,
                     "fit_end_time": config.train_end,
                     "instruments": config.market,
-                    "label": [label_expr],
+                    "label": ([label_expr], ["LABEL0"]),
+                    "learn_processors": learn_processors,
+                    "infer_processors": infer_processors,
                 },
             }
         else:
@@ -528,7 +542,7 @@ class QlibTrainer:
         from qlib.utils import init_instance_by_config
         
         # Load the trained model
-        model, config = self.load_trained_model(
+        model, train_config = self.load_trained_model(
             feature_set=feature_set,
             model_type=model_type,
             horizon=horizon,
@@ -549,6 +563,15 @@ class QlibTrainer:
         # Need enough history for feature computation (at least 60 days for Alpha360)
         start_date = (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=120)).strftime("%Y-%m-%d")
         
+        # Get fit times from training config for consistent normalization
+        if train_config:
+            fit_start = train_config.train_start
+            fit_end = train_config.train_end
+        else:
+            # Fallback if no config saved
+            fit_start = "2017-01-01"
+            fit_end = "2022-12-31"
+        
         # Create handler config for the specific stocks
         handler_config = self._get_handler_config_for_stocks(
             feature_set=feature_set,
@@ -556,6 +579,8 @@ class QlibTrainer:
             stock_codes=stock_codes,
             start_date=start_date,
             end_date=end_date,
+            fit_start=fit_start,
+            fit_end=fit_end,
         )
         
         # Create dataset for prediction
@@ -608,9 +633,35 @@ class QlibTrainer:
         stock_codes: List[str],
         start_date: str,
         end_date: str,
+        fit_start: str = None,
+        fit_end: str = None,
     ) -> Dict:
-        """Get handler configuration for specific stocks."""
+        """Get handler configuration for specific stocks.
+        
+        Args:
+            feature_set: Feature set type
+            horizon: Prediction horizon
+            stock_codes: List of stock codes
+            start_date: Data start date
+            end_date: Data end date
+            fit_start: Fit start date for normalization (should match training)
+            fit_end: Fit end date for normalization (should match training)
+        """
         label_expression = f"Ref($close, -{horizon.value})/Ref($close, -1) - 1"
+        
+        # Use training fit period if provided, otherwise use data range
+        fit_start_time = fit_start or start_date
+        fit_end_time = fit_end or end_date
+        
+        # Define processors for data handling
+        learn_processors = [
+            {"class": "DropnaLabel"},
+        ]
+        infer_processors = [
+            {"class": "ProcessInf", "kwargs": {}},
+            {"class": "ZScoreNorm", "kwargs": {}},
+            {"class": "Fillna", "kwargs": {}},
+        ]
         
         if feature_set == FeatureSet.ALPHA158:
             handler_class = "Alpha158"
@@ -624,9 +675,11 @@ class QlibTrainer:
                 "instruments": stock_codes,
                 "start_time": start_date,
                 "end_time": end_date,
-                "fit_start_time": start_date,
-                "fit_end_time": end_date,
+                "fit_start_time": fit_start_time,
+                "fit_end_time": fit_end_time,
                 "label": ([label_expression], ["LABEL0"]),
+                "learn_processors": learn_processors,
+                "infer_processors": infer_processors,
             },
         }
     
@@ -750,29 +803,33 @@ class QlibTrainer:
         """
         from qlib.utils import init_instance_by_config
         from qlib.workflow import R
-        from qlib.workflow.record_temp import SignalRecord
         
         model_name = f"{feature_set.value}_{model_type.value}_horizon{horizon.value}"
         market = kwargs.get('market', original_config.market if original_config else 'csi300')
         
-        # Create config for finetuning
-        config = TrainingConfig(
-            feature_set=feature_set,
-            model_type=model_type,
-            horizon=horizon,
-            market=market,
-            train_start=finetune_start,
-            train_end=finetune_end,
-            valid_start=finetune_start,
-            valid_end=finetune_end,
-            test_start=finetune_start,
-            test_end=finetune_end,
-        )
+        # Get the label expression for this horizon
+        label_expr = f"Ref($close, -{horizon.value})/Ref($close, -1) - 1"
         
-        # Get handler config
-        handler_config = self._get_handler_config(config)
+        # Create a simplified handler config for finetuning
+        if feature_set == FeatureSet.ALPHA158:
+            handler_class = "Alpha158"
+        else:
+            handler_class = "Alpha360"
         
-        # Create dataset for finetuning
+        handler_config = {
+            "class": handler_class,
+            "module_path": "qlib.contrib.data.handler",
+            "kwargs": {
+                "start_time": finetune_start,
+                "end_time": finetune_end,
+                "fit_start_time": finetune_start,
+                "fit_end_time": finetune_end,
+                "instruments": market,
+                "label": ([label_expr], ["LABEL0"]),
+            },
+        }
+        
+        # Create dataset for finetuning - need train segment for LGBModel.finetune
         dataset_config = {
             "class": "DatasetH",
             "module_path": "qlib.data.dataset",
@@ -789,20 +846,23 @@ class QlibTrainer:
         # Finetuning
         experiment_name = f"{model_name}_finetune_{finetune_id}"
         with R.start(experiment_name=experiment_name):
-            # For LGBModel, we retrain with warm start
+            # For LGBModel, we use finetune method or retrain
             # For Transformer, we continue training
             if model_type == ModelType.LGBMODEL:
-                # LightGBM doesn't support true finetuning, so we retrain
-                model_config = self._get_model_config(config)
-                model = init_instance_by_config(model_config)
-                model.fit(dataset)
+                # LGBModel has a finetune method that adds more trees
+                if hasattr(model, 'finetune') and model.model is not None:
+                    model.finetune(dataset, num_boost_round=10, verbose_eval=20)
+                else:
+                    # Fallback: retrain from scratch with a new model
+                    from qlib.contrib.model.gbdt import LGBModel as QlibLGBModel
+                    model = QlibLGBModel(loss="mse")
+                    # For full retraining, we need valid segment
+                    dataset_config["kwargs"]["segments"]["valid"] = (finetune_start, finetune_end)
+                    dataset = init_instance_by_config(dataset_config)
+                    model.fit(dataset)
             else:
-                # Transformer can be finetuned
-                model.fit(dataset, num_boost_round=100)  # Fewer epochs for finetuning
-            
-            # Generate predictions
-            rec = SignalRecord(model, dataset, recorder=R.get_recorder())
-            rec.generate()
+                # Transformer - continue training with fewer epochs
+                model.fit(dataset)
             
             metrics = R.get_recorder().list_metrics()
         
@@ -811,10 +871,22 @@ class QlibTrainer:
             self.train_output_path, 'models',
             f"{model_name}_finetuned_{finetune_id}.pkl"
         )
+        
+        # Create a config object for the finetuned model
+        finetuned_config = TrainingConfig(
+            feature_set=feature_set,
+            model_type=model_type,
+            horizon=horizon,
+            market=market,
+            train_start=finetune_start,
+            train_end=finetune_end,
+        )
+        
         with open(model_save_path, 'wb') as f:
             pickle.dump({
                 'model': model,
-                'config': config,
+                'config': finetuned_config,
+                'original_model': model_name,
                 'finetune_id': finetune_id,
                 'timestamp': datetime.now().isoformat(),
                 'finetuned': True,
@@ -931,10 +1003,14 @@ class QlibTrainer:
                     
                     model_info = {
                         'filename': filename,
+                        'name': filename.replace('.pkl', ''),
                         'path': filepath,
                         'created': datetime.fromtimestamp(
                             os.path.getctime(filepath)
                         ).isoformat(),
+                        'timestamp': datetime.fromtimestamp(
+                            os.path.getctime(filepath)
+                        ).strftime('%Y-%m-%d %H:%M'),
                         'size_mb': round(os.path.getsize(filepath) / (1024 * 1024), 2)
                     }
                     
@@ -949,6 +1025,43 @@ class QlibTrainer:
                     models.append(model_info)
         
         return sorted(models, key=lambda x: x['created'], reverse=True)
+    
+    def get_finetuned_models(self) -> List[Dict[str, Any]]:
+        """List all finetuned models."""
+        finetuned = []
+        models_dir = os.path.join(self.train_output_path, 'models')
+        
+        if os.path.exists(models_dir):
+            for filename in os.listdir(models_dir):
+                if filename.endswith('.pkl') and 'finetuned' in filename:
+                    filepath = os.path.join(models_dir, filename)
+                    
+                    # Try to load model info
+                    try:
+                        with open(filepath, 'rb') as f:
+                            data = pickle.load(f)
+                        
+                        finetuned.append({
+                            'name': filename.replace('.pkl', ''),
+                            'original_model': data.get('original_model', 'Unknown'),
+                            'finetune_start': data.get('finetune_start', 'N/A'),
+                            'finetune_end': data.get('finetune_end', 'N/A'),
+                            'timestamp': data.get('timestamp', 'N/A'),
+                            'status': 'completed',
+                        })
+                    except Exception:
+                        finetuned.append({
+                            'name': filename.replace('.pkl', ''),
+                            'original_model': 'Unknown',
+                            'finetune_start': 'N/A',
+                            'finetune_end': 'N/A',
+                            'timestamp': datetime.fromtimestamp(
+                                os.path.getctime(filepath)
+                            ).isoformat(),
+                            'status': 'completed',
+                        })
+        
+        return sorted(finetuned, key=lambda x: x['timestamp'], reverse=True)
     
     def get_model_predictions(
         self,

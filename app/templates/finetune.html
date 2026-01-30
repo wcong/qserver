@@ -1,0 +1,363 @@
+{% extends "base.html" %}
+
+{% block title %}QServer - Finetune Model{% endblock %}
+
+{% block content %}
+<div class="row mt-4">
+    <div class="col-12">
+        <h2><i class="bi bi-wrench-adjustable"></i> Finetune Model</h2>
+        <p class="text-muted">Select an existing model and finetune it with new data</p>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <!-- Model Selection -->
+    <div class="col-md-5">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-cpu"></i> Select Model to Finetune</h5>
+            </div>
+            <div class="card-body">
+                <form id="finetune-form">
+                    <div class="mb-3">
+                        <label class="form-label">Available Models</label>
+                        <div id="model-selection" style="max-height: 300px; overflow-y: auto;">
+                            {% if models %}
+                            {% for model in models %}
+                            <div class="form-check mb-2 p-2 border rounded">
+                                <input class="form-check-input" type="radio" name="selected_model" 
+                                       id="model_{{ loop.index }}" 
+                                       value="{{ model.name }}"
+                                       data-feature-set="{{ model.feature_set }}"
+                                       data-model-type="{{ model.model_type }}"
+                                       data-horizon="{{ model.horizon }}"
+                                       {% if loop.first %}checked{% endif %}>
+                                <label class="form-check-label w-100" for="model_{{ loop.index }}">
+                                    <strong>{{ model.name }}</strong>
+                                    <br>
+                                    <small class="text-muted">
+                                        Feature: {{ model.feature_set }} | 
+                                        Model: {{ model.model_type }} | 
+                                        Horizon: {{ model.horizon }} days
+                                    </small>
+                                    <br>
+                                    <small class="text-muted">Trained: {{ model.timestamp if model.timestamp else 'N/A' }}</small>
+                                </label>
+                            </div>
+                            {% endfor %}
+                            {% else %}
+                            <div class="alert alert-warning">
+                                <i class="bi bi-exclamation-triangle"></i> No trained models available.
+                                <a href="/train">Train a model first</a>.
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Finetune Configuration -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-sliders"></i> Finetune Configuration</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="finetune_start" class="form-label">Finetune Data Start</label>
+                    <input type="date" class="form-control" id="finetune_start" name="finetune_start" value="{{ finetune_start }}">
+                    <small class="text-muted">Start date for finetuning data</small>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="finetune_end" class="form-label">Finetune Data End</label>
+                    <input type="date" class="form-control" id="finetune_end" name="finetune_end" value="{{ finetune_end }}">
+                    <small class="text-muted">End date for finetuning data</small>
+                </div>
+                
+                <hr>
+                
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i>
+                    <strong>Finetuning</strong> continues training an existing model with new data.
+                    For LightGBM, this adds more trees. For Transformers, this continues gradient descent.
+                </div>
+                
+                <div class="d-grid gap-2">
+                    <button type="button" class="btn btn-primary btn-lg" id="finetune-btn" onclick="startFinetune()" {% if not models %}disabled{% endif %}>
+                        <i class="bi bi-play-fill"></i> Start Finetuning
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" onclick="finetuneAllModels()" {% if not models %}disabled{% endif %}>
+                        <i class="bi bi-collection-fill"></i> Finetune All Models
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Status -->
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-activity"></i> Status</h5>
+            </div>
+            <div class="card-body">
+                <div id="finetune-status">
+                    <p class="text-muted text-center">Ready to finetune</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mt-3">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-info-circle"></i> Selected Model Info</h5>
+            </div>
+            <div class="card-body">
+                <div id="model-info">
+                    <p class="text-muted text-center">Select a model to see details</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Finetune Log -->
+<div class="row mt-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-terminal"></i> Finetune Log</h5>
+            </div>
+            <div class="card-body">
+                <pre id="finetune-log" class="bg-dark text-light p-3" style="max-height: 300px; overflow-y: auto; font-size: 0.85rem;">Waiting for finetuning to start...</pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Finetuned Models History -->
+<div class="row mt-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-clock-history"></i> Finetuned Models</h5>
+            </div>
+            <div class="card-body">
+                <div id="finetuned-models">
+                    {% if finetuned_models %}
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Model Name</th>
+                                    <th>Original Model</th>
+                                    <th>Finetune Period</th>
+                                    <th>Timestamp</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for model in finetuned_models %}
+                                <tr>
+                                    <td>{{ model.name }}</td>
+                                    <td>{{ model.original_model }}</td>
+                                    <td>{{ model.finetune_start }} - {{ model.finetune_end }}</td>
+                                    <td>{{ model.timestamp }}</td>
+                                    <td><span class="badge bg-success">{{ model.status }}</span></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted text-center">No finetuned models yet</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let finetuneInProgress = false;
+
+// Update model info when selection changes
+document.querySelectorAll('input[name="selected_model"]').forEach(radio => {
+    radio.addEventListener('change', updateModelInfo);
+});
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', updateModelInfo);
+
+function updateModelInfo() {
+    const selected = document.querySelector('input[name="selected_model"]:checked');
+    const infoDiv = document.getElementById('model-info');
+    
+    if (selected) {
+        const featureSet = selected.dataset.featureSet;
+        const modelType = selected.dataset.modelType;
+        const horizon = selected.dataset.horizon;
+        
+        infoDiv.innerHTML = `
+            <table class="table table-sm">
+                <tr><td><strong>Name:</strong></td><td>${selected.value}</td></tr>
+                <tr><td><strong>Feature Set:</strong></td><td>${featureSet}</td></tr>
+                <tr><td><strong>Model Type:</strong></td><td>${modelType}</td></tr>
+                <tr><td><strong>Horizon:</strong></td><td>${horizon} days</td></tr>
+            </table>
+        `;
+    } else {
+        infoDiv.innerHTML = '<p class="text-muted text-center">Select a model to see details</p>';
+    }
+}
+
+async function startFinetune() {
+    if (finetuneInProgress) {
+        alert('Finetuning already in progress');
+        return;
+    }
+    
+    const selected = document.querySelector('input[name="selected_model"]:checked');
+    if (!selected) {
+        alert('Please select a model to finetune');
+        return;
+    }
+    
+    const btn = document.getElementById('finetune-btn');
+    const statusDiv = document.getElementById('finetune-status');
+    const logPre = document.getElementById('finetune-log');
+    
+    const formData = {
+        feature_set: selected.dataset.featureSet,
+        model_type: selected.dataset.modelType,
+        horizon: parseInt(selected.dataset.horizon),
+        finetune_start: document.getElementById('finetune_start').value,
+        finetune_end: document.getElementById('finetune_end').value,
+    };
+    
+    finetuneInProgress = true;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Finetuning...';
+    
+    statusDiv.innerHTML = `
+        <div class="alert alert-info">
+            <div class="d-flex align-items-center">
+                <div class="spinner-border spinner-border-sm me-2"></div>
+                <div>Finetuning <strong>${selected.value}</strong>...</div>
+            </div>
+        </div>
+    `;
+    
+    logPre.textContent = `[${new Date().toISOString()}] Starting finetune for ${selected.value}...\n`;
+    logPre.textContent += `Finetune period: ${formData.finetune_start} to ${formData.finetune_end}\n`;
+    
+    try {
+        const response = await fetch('/api/finetune', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formData)
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            statusDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <i class="bi bi-check-circle"></i> Finetuning completed for <strong>${selected.value}</strong>
+                </div>
+            `;
+            logPre.textContent += `[${new Date().toISOString()}] Finetuning completed successfully!\n`;
+            logPre.textContent += JSON.stringify(data.result, null, 2);
+        } else {
+            statusDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-x-circle"></i> Finetuning failed: ${data.message}
+                </div>
+            `;
+            logPre.textContent += `[${new Date().toISOString()}] Error: ${data.message}\n`;
+        }
+    } catch (error) {
+        statusDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle"></i> Error: ${error.message}
+            </div>
+        `;
+        logPre.textContent += `[${new Date().toISOString()}] Error: ${error.message}\n`;
+    } finally {
+        finetuneInProgress = false;
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-play-fill"></i> Start Finetuning';
+    }
+}
+
+async function finetuneAllModels() {
+    if (finetuneInProgress) {
+        alert('Finetuning already in progress');
+        return;
+    }
+    
+    if (!confirm('This will finetune all trained models. Continue?')) {
+        return;
+    }
+    
+    const statusDiv = document.getElementById('finetune-status');
+    const logPre = document.getElementById('finetune-log');
+    
+    const formData = {
+        finetune_start: document.getElementById('finetune_start').value,
+        finetune_end: document.getElementById('finetune_end').value,
+    };
+    
+    finetuneInProgress = true;
+    
+    statusDiv.innerHTML = `
+        <div class="alert alert-info">
+            <div class="d-flex align-items-center">
+                <div class="spinner-border spinner-border-sm me-2"></div>
+                <div>Finetuning all models...</div>
+            </div>
+        </div>
+    `;
+    
+    logPre.textContent = `[${new Date().toISOString()}] Starting finetune for all models...\n`;
+    
+    try {
+        const response = await fetch('/api/finetune/all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formData)
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            statusDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <i class="bi bi-check-circle"></i> All models finetuned successfully
+                </div>
+            `;
+            logPre.textContent += `[${new Date().toISOString()}] Finetuning completed!\n`;
+            logPre.textContent += JSON.stringify(data.result, null, 2);
+        } else {
+            statusDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-x-circle"></i> Finetuning failed: ${data.message}
+                </div>
+            `;
+        }
+    } catch (error) {
+        statusDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle"></i> Error: ${error.message}
+            </div>
+        `;
+    } finally {
+        finetuneInProgress = false;
+    }
+}
+</script>
+{% endblock %}
