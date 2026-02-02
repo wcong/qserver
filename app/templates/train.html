@@ -12,51 +12,43 @@
 
 <div class="row mt-3">
     <!-- Training Configuration -->
-    <div class="col-md-6">
+    <div class="col-md-4">
         <div class="card">
             <div class="card-header">
                 <h5 class="mb-0"><i class="bi bi-sliders"></i> Training Configuration</h5>
             </div>
             <div class="card-body">
                 <form id="train-form">
-                    <div class="mb-3">
+                    <div class="mb-2">
                         <label for="feature_set" class="form-label">Feature Set</label>
-                        <select class="form-select" id="feature_set" name="feature_set" required>
+                        <select class="form-select form-select-sm" id="feature_set" name="feature_set" required>
                             {% for fs in feature_sets %}
                             <option value="{{ fs }}">{{ fs }}</option>
                             {% endfor %}
                         </select>
-                        <small class="text-muted">
-                            Alpha158: 158 technical indicators<br>
-                            Alpha360: 6 price features × 60 days
-                        </small>
                     </div>
                     
-                    <div class="mb-3">
+                    <div class="mb-2">
                         <label for="model_type" class="form-label">Model Type</label>
-                        <select class="form-select" id="model_type" name="model_type" required>
+                        <select class="form-select form-select-sm" id="model_type" name="model_type" required>
                             {% for mt in model_types %}
                             <option value="{{ mt }}">{{ mt }}</option>
                             {% endfor %}
                         </select>
-                        <small class="text-muted">
-                            LGBModel: LightGBM (fast, good for tabular)<br>
-                            Transformer: Deep learning (better for sequences)
-                        </small>
                     </div>
                     
-                    <div class="mb-3">
+                    <div class="mb-2">
                         <label for="horizon" class="form-label">Prediction Horizon</label>
-                        <select class="form-select" id="horizon" name="horizon" required>
+                        <select class="form-select form-select-sm" id="horizon" name="horizon" required>
                             {% for h in horizons %}
                             <option value="{{ h.value }}">{{ h.name }} ({{ h.value }} day{% if h.value > 1 %}s{% endif %})</option>
                             {% endfor %}
                         </select>
                     </div>
                     
-                    <div class="mb-3">
-                        <label for="market" class="form-label">Market / Stock Pool</label>
-                        <select class="form-select" id="market" name="market">
+                    <div class="mb-2">
+                        <label for="market" class="form-label">Market</label>
+                        <select class="form-select form-select-sm" id="market" name="market">
                             <option value="csi300" selected>CSI 300</option>
                             <option value="csi500">CSI 500</option>
                             <option value="all">All Stocks</option>
@@ -64,57 +56,49 @@
                     </div>
                     
                     <hr>
-                    <h6>Date Configuration</h6>
-                    
-                    <div class="alert alert-secondary mb-3" id="data-range-info">
-                        <i class="bi bi-database"></i> <strong>Available Data:</strong>
-                        <span id="data-range-text">Loading...</span>
+                    <div class="alert alert-secondary py-1 mb-2" id="data-range-info">
+                        <small><i class="bi bi-database"></i> <span id="data-range-text">Loading...</span></small>
                     </div>
                     
                     <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label for="train_start" class="form-label">Train Start</label>
-                            <input type="date" class="form-control" id="train_start" name="train_start">
+                        <div class="col-6 mb-2">
+                            <label for="train_start" class="form-label small">Train Start</label>
+                            <input type="date" class="form-control form-control-sm" id="train_start" name="train_start">
                         </div>
-                        <div class="col-md-6 mb-3">
-                            <label for="train_end" class="form-label">Train End</label>
-                            <input type="date" class="form-control" id="train_end" name="train_end">
-                            <small class="text-muted">60 days before data end</small>
+                        <div class="col-6 mb-2">
+                            <label for="train_end" class="form-label small">Train End</label>
+                            <input type="date" class="form-control form-control-sm" id="train_end" name="train_end">
                         </div>
                     </div>
                     
                     <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label for="valid_start" class="form-label">Valid Start</label>
-                            <input type="date" class="form-control" id="valid_start" name="valid_start">
-                            <small class="text-muted">Day after train end</small>
+                        <div class="col-6 mb-2">
+                            <label for="valid_start" class="form-label small">Valid Start</label>
+                            <input type="date" class="form-control form-control-sm" id="valid_start" name="valid_start">
                         </div>
-                        <div class="col-md-6 mb-3">
-                            <label for="valid_end" class="form-label">Valid End</label>
-                            <input type="date" class="form-control" id="valid_end" name="valid_end">
-                            <small class="text-muted">Data end - horizon days</small>
+                        <div class="col-6 mb-2">
+                            <label for="valid_end" class="form-label small">Valid End</label>
+                            <input type="date" class="form-control form-control-sm" id="valid_end" name="valid_end">
                         </div>
                     </div>
                     
                     <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label for="test_start" class="form-label">Test Start</label>
-                            <input type="date" class="form-control" id="test_start" name="test_start">
-                            <small class="text-muted">7 days before data end</small>
+                        <div class="col-6 mb-2">
+                            <label for="test_start" class="form-label small">Test Start</label>
+                            <input type="date" class="form-control form-control-sm" id="test_start" name="test_start">
                         </div>
-                        <div class="col-md-6 mb-3">
-                            <label for="test_end" class="form-label">Test End</label>
-                            <input type="date" class="form-control" id="test_end" name="test_end">
-                            <small class="text-muted">Latest available date</small>
+                        <div class="col-6 mb-2">
+                            <label for="test_end" class="form-label small">Test End</label>
+                            <input type="date" class="form-control form-control-sm" id="test_end" name="test_end">
                         </div>
                     </div>
                     
-                    <div class="d-grid gap-2">
-                        <button type="button" class="btn btn-primary btn-lg" id="train-btn" onclick="startTraining()">
+                    <div class="d-grid gap-2 mt-2">
+                        <button type="button" class="btn btn-primary" id="train-btn" onclick="startTraining()">
                             <i class="bi bi-play-fill"></i> Start Training
                         </button>
-                        <button type="button" class="btn btn-outline-secondary" onclick="trainAllModels()">
-                            <i class="bi bi-collection-fill"></i> Train All Combinations
+                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="trainAllModels()">
+                            <i class="bi bi-collection-fill"></i> Train All
                         </button>
                     </div>
                 </form>
@@ -122,8 +106,45 @@
         </div>
     </div>
     
-    <!-- Training Status & History -->
-    <div class="col-md-6">
+    <!-- Trained Models -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-cpu"></i> Trained Models</h5>
+                <button class="btn btn-sm btn-outline-primary" onclick="refreshModels()">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+            </div>
+            <div class="card-body p-0" style="max-height: 500px; overflow-y: auto;">
+                <div id="models-list">
+                    {% if models %}
+                    <ul class="list-group list-group-flush">
+                        {% for model in models %}
+                        <li class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" 
+                            style="cursor: pointer;" onclick="showModelDetail('{{ model.filename }}')">
+                            <div>
+                                <strong class="small">{{ model.name }}</strong>
+                                <br><small class="text-muted">{{ model.timestamp if model.timestamp else 'N/A' }} | {{ model.size_mb }}MB</small>
+                            </div>
+                            <div>
+                                {% if model.finetuned %}<span class="badge bg-warning text-dark me-1">FT</span>{% endif %}
+                                <button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteModel('{{ model.filename }}', '{{ model.name }}')" title="Delete">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                    <p class="text-muted text-center p-3">No models trained yet</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Training Status & Model Detail -->
+    <div class="col-md-4">
         <div class="card mb-3">
             <div class="card-header">
                 <h5 class="mb-0"><i class="bi bi-activity"></i> Training Status</h5>
@@ -135,36 +156,12 @@
             </div>
         </div>
         
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-clock-history"></i> Trained Models</h5>
-                <button class="btn btn-sm btn-outline-primary" onclick="refreshModels()">
-                    <i class="bi bi-arrow-clockwise"></i>
-                </button>
+        <div class="card" id="model-detail-card" style="display: none;">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-info-circle"></i> Model Details</h5>
             </div>
-            <div class="card-body" style="max-height: 400px; overflow-y: auto;">
-                <div id="models-list">
-                    {% if models %}
-                    <ul class="list-group">
-                        {% for model in models %}
-                        <li class="list-group-item d-flex justify-content-between align-items-center">
-                            <div>
-                                <strong>{{ model.name }}</strong>
-                                <br><small class="text-muted">{{ model.timestamp if model.timestamp else 'N/A' }}</small>
-                            </div>
-                            <div>
-                                <span class="badge bg-success me-2">Trained</span>
-                                <button class="btn btn-sm btn-outline-danger" onclick="deleteModel('{{ model.filename }}', '{{ model.name }}')" title="Delete model">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </div>
-                        </li>
-                        {% endfor %}
-                    </ul>
-                    {% else %}
-                    <p class="text-muted text-center">No models trained yet</p>
-                    {% endif %}
-                </div>
+            <div class="card-body" id="model-detail-content">
+                <!-- Model details will be shown here -->
             </div>
         </div>
     </div>
@@ -449,16 +446,17 @@ async function refreshModels() {
         
         if (data.status === 'success' && data.models.length > 0) {
             modelsDiv.innerHTML = `
-                <ul class="list-group">
+                <ul class="list-group list-group-flush">
                     ${data.models.map(model => `
-                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <li class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" 
+                            style="cursor: pointer;" onclick="showModelDetail('${model.filename}')">
                             <div>
-                                <strong>${model.name}</strong>
-                                <br><small class="text-muted">${model.timestamp || 'N/A'}</small>
+                                <strong class="small">${model.name}</strong>
+                                <br><small class="text-muted">${model.timestamp || 'N/A'} | ${model.size_mb}MB</small>
                             </div>
                             <div>
-                                <span class="badge bg-success me-2">Trained</span>
-                                <button class="btn btn-sm btn-outline-danger" onclick="deleteModel('${model.filename}', '${model.name}')" title="Delete model">
+                                ${model.finetuned ? '<span class="badge bg-warning text-dark me-1">FT</span>' : ''}
+                                <button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteModel('${model.filename}', '${model.name}')" title="Delete">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </div>
@@ -467,10 +465,56 @@ async function refreshModels() {
                 </ul>
             `;
         } else {
-            modelsDiv.innerHTML = '<p class="text-muted text-center">No models trained yet</p>';
+            modelsDiv.innerHTML = '<p class="text-muted text-center p-3">No models trained yet</p>';
         }
     } catch (error) {
         console.error('Failed to refresh models:', error);
+    }
+}
+
+async function showModelDetail(filename) {
+    const detailCard = document.getElementById('model-detail-card');
+    const detailContent = document.getElementById('model-detail-content');
+    
+    detailContent.innerHTML = '<div class="text-center"><div class="spinner-border spinner-border-sm"></div> Loading...</div>';
+    detailCard.style.display = 'block';
+    
+    try {
+        const response = await fetch(`/api/models/detail?filename=${encodeURIComponent(filename)}`);
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            const model = data.model;
+            const trainTime = model.training_time ? `${model.training_time.toFixed(1)}s` : 'N/A';
+            
+            detailContent.innerHTML = `
+                <table class="table table-sm mb-0">
+                    <tr><td class="text-muted">Name:</td><td><strong>${model.name}</strong></td></tr>
+                    <tr><td class="text-muted">Feature Set:</td><td>${model.feature_set || 'N/A'}</td></tr>
+                    <tr><td class="text-muted">Model Type:</td><td>${model.model_type || 'N/A'}</td></tr>
+                    <tr><td class="text-muted">Horizon:</td><td>${model.horizon || 'N/A'} days</td></tr>
+                    <tr><td class="text-muted">Market:</td><td>${model.market || 'N/A'}</td></tr>
+                    <tr><td class="text-muted">Train Period:</td><td>${model.train_start || 'N/A'} ~ ${model.train_end || 'N/A'}</td></tr>
+                    <tr><td class="text-muted">Valid Period:</td><td>${model.valid_start || 'N/A'} ~ ${model.valid_end || 'N/A'}</td></tr>
+                    <tr><td class="text-muted">Test Period:</td><td>${model.test_start || 'N/A'} ~ ${model.test_end || 'N/A'}</td></tr>
+                    <tr><td class="text-muted">Created:</td><td>${model.timestamp || 'N/A'}</td></tr>
+                    <tr><td class="text-muted">Training Time:</td><td><strong>${trainTime}</strong></td></tr>
+                    <tr><td class="text-muted">Size:</td><td>${model.size_mb} MB</td></tr>
+                    ${model.finetuned ? '<tr><td class="text-muted">Type:</td><td><span class="badge bg-warning text-dark">Finetuned</span></td></tr>' : ''}
+                </table>
+                ${model.metrics ? `
+                <hr>
+                <h6>Metrics</h6>
+                <table class="table table-sm mb-0">
+                    ${Object.entries(model.metrics).map(([k, v]) => `<tr><td class="text-muted">${k}:</td><td>${typeof v === 'number' ? v.toFixed(4) : v}</td></tr>`).join('')}
+                </table>
+                ` : ''}
+            `;
+        } else {
+            detailContent.innerHTML = `<div class="alert alert-warning">${data.message}</div>`;
+        }
+    } catch (error) {
+        detailContent.innerHTML = `<div class="alert alert-danger">Error loading details: ${error.message}</div>`;
     }
 }
 </script>

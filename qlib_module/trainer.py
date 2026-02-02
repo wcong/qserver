@@ -68,9 +68,10 @@ class TrainingConfig:
     
     def get_label_expression(self) -> str:
         """Get label expression for the prediction horizon."""
-        # Ref($close, -n) means the close price n days later
+        # Ref($close, -n) means the close price n days later (negative = future)
         # Label = future return = (future_close - current_close) / current_close
-        return f"Ref($close, -{self.horizon.value})/Ref($close, -1) - 1"
+        # $close is today's close price
+        return f"Ref($close, -{self.horizon.value})/$close - 1"
 
 
 class QlibTrainer:
@@ -476,14 +477,14 @@ class QlibTrainer:
                 "module_path": "qlib.contrib.model.pytorch_transformer",
                 "kwargs": {
                     "d_feat": d_feat,
-                    "d_model": 64,
-                    "nhead": 4,
-                    "num_layers": 2,
-                    "dropout": 0.1,
-                    "n_epochs": 100,
+                    "d_model": 128,
+                    "nhead": 8,
+                    "num_layers": 10,
+                    "dropout": 0.3,
+                    "n_epochs": 300,        # Increased from 100 - more training epochs
                     "lr": 0.0001,
-                    "early_stop": 20,
-                    "batch_size": 2048,
+                    "early_stop": 50,       # Increased from 20 - more patience before early stop
+                    "batch_size": 1024,
                     "metric": "loss",
                     "loss": "mse",
                     "GPU": 0,
@@ -854,7 +855,7 @@ class QlibTrainer:
             fit_start: Fit start date for normalization (should match training)
             fit_end: Fit end date for normalization (should match training)
         """
-        label_expression = f"Ref($close, -{horizon.value})/Ref($close, -1) - 1"
+        label_expression = f"Ref($close, -{horizon.value})/$close - 1"
         
         # Use training fit period if provided, otherwise use data range
         fit_start_time = fit_start or start_date
@@ -1039,7 +1040,8 @@ class QlibTrainer:
         market = kwargs.get('market', original_config.market if original_config else 'csi300')
         
         # Get the label expression for this horizon
-        label_expr = f"Ref($close, -{horizon.value})/Ref($close, -1) - 1"
+        # Ref($close, -n) = close price n days in the future, $close = today's close
+        label_expr = f"Ref($close, -{horizon.value})/$close - 1"
         
         # Create a simplified handler config for finetuning
         if feature_set == FeatureSet.ALPHA158:
@@ -1301,6 +1303,107 @@ class QlibTrainer:
                     models.append(model_info)
         
         return sorted(models, key=lambda x: x['created'], reverse=True)
+    
+    def get_model_detail(self, filename: str) -> Optional[Dict[str, Any]]:
+        """
+        Get detailed information about a trained model.
+        
+        Args:
+            filename: The filename of the model
+            
+        Returns:
+            Dictionary with model details or None if not found
+        """
+        models_dir = os.path.join(self.train_output_path, 'models')
+        
+        # Ensure filename ends with .pkl
+        if not filename.endswith('.pkl'):
+            filename = filename + '.pkl'
+        
+        filepath = os.path.join(models_dir, filename)
+        
+        if not os.path.exists(filepath):
+            return None
+        
+        # Basic info from file
+        detail = {
+            'filename': filename,
+            'name': filename.replace('.pkl', ''),
+            'path': filepath,
+            'created': datetime.fromtimestamp(os.path.getctime(filepath)).isoformat(),
+            'timestamp': datetime.fromtimestamp(os.path.getctime(filepath)).strftime('%Y-%m-%d %H:%M:%S'),
+            'size_mb': round(os.path.getsize(filepath) / (1024 * 1024), 2),
+            'finetuned': 'finetuned' in filename,
+        }
+        
+        # Parse from filename
+        parts = filename.replace('.pkl', '').split('_')
+        if len(parts) >= 3:
+            detail['feature_set'] = parts[0]
+            detail['model_type'] = parts[1]
+            for part in parts:
+                if part.startswith('horizon'):
+                    detail['horizon'] = part.replace('horizon', '')
+        
+        # Try to load additional info from the pickle file
+        try:
+            with open(filepath, 'rb') as f:
+                data = pickle.load(f)
+            
+            if isinstance(data, dict):
+                # Get config info
+                config = data.get('config')
+                if config:
+                    if hasattr(config, 'feature_set'):
+                        detail['feature_set'] = config.feature_set.value if hasattr(config.feature_set, 'value') else str(config.feature_set)
+                    if hasattr(config, 'model_type'):
+                        detail['model_type'] = config.model_type.value if hasattr(config.model_type, 'value') else str(config.model_type)
+                    if hasattr(config, 'horizon'):
+                        detail['horizon'] = config.horizon.value if hasattr(config.horizon, 'value') else str(config.horizon)
+                    if hasattr(config, 'market'):
+                        detail['market'] = config.market
+                    if hasattr(config, 'train_start'):
+                        detail['train_start'] = config.train_start
+                    if hasattr(config, 'train_end'):
+                        detail['train_end'] = config.train_end
+                    if hasattr(config, 'valid_start'):
+                        detail['valid_start'] = config.valid_start
+                    if hasattr(config, 'valid_end'):
+                        detail['valid_end'] = config.valid_end
+                    if hasattr(config, 'test_start'):
+                        detail['test_start'] = config.test_start
+                    if hasattr(config, 'test_end'):
+                        detail['test_end'] = config.test_end
+                
+                # Get other saved info
+                if 'timestamp' in data:
+                    detail['saved_timestamp'] = data['timestamp']
+                if 'training_id' in data:
+                    detail['training_id'] = data['training_id']
+                if 'finetune_start' in data:
+                    detail['finetune_start'] = data['finetune_start']
+                if 'finetune_end' in data:
+                    detail['finetune_end'] = data['finetune_end']
+                    
+        except Exception as e:
+            logger.warning(f"Could not load model details from pickle: {e}")
+        
+        # Try to get training time from history
+        history = self.get_training_history()
+        for record in history:
+            if record.get('name') == detail['name'].split('_finetuned')[0] or record.get('id') in filename:
+                if record.get('start_time') and record.get('end_time'):
+                    try:
+                        start = datetime.fromisoformat(record['start_time'].replace('Z', '+00:00'))
+                        end = datetime.fromisoformat(record['end_time'].replace('Z', '+00:00'))
+                        detail['training_time'] = (end - start).total_seconds()
+                    except:
+                        pass
+                if record.get('metrics'):
+                    detail['metrics'] = record['metrics']
+                break
+        
+        return detail
     
     def delete_model(self, filename: str) -> Dict[str, Any]:
         """

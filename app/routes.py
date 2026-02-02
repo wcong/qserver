@@ -404,6 +404,38 @@ def delete_model():
         }), 500
 
 
+@main_bp.route('/api/models/detail')
+def get_model_detail():
+    """API endpoint to get detailed information about a trained model."""
+    try:
+        trainer = QlibTrainer()
+        filename = request.args.get('filename')
+        
+        if not filename:
+            return jsonify({
+                'status': 'error',
+                'message': 'filename is required'
+            }), 400
+        
+        detail = trainer.get_model_detail(filename)
+        
+        if detail:
+            return jsonify({
+                'status': 'success',
+                'model': detail
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Model not found'
+            }), 404
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
 @main_bp.route('/api/models/load', methods=['POST'])
 def load_model():
     """API endpoint to load a trained model."""
