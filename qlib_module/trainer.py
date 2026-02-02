@@ -17,6 +17,7 @@ import os
 import json
 import pickle
 import logging
+import traceback
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
@@ -121,6 +122,56 @@ class QlibTrainer:
             logger.info(f"Qlib initialized with data path: {self.data_path}")
         except Exception as e:
             logger.warning(f"Failed to initialize qlib: {e}")
+            logger.warning(traceback.format_exc())
+    
+    def get_data_date_range(self, market: str = 'csi300') -> Dict[str, str]:
+        """
+        Get the available date range for the specified market.
+        
+        Args:
+            market: Market name (e.g., 'csi300', 'csi500')
+            
+        Returns:
+            Dictionary with 'start_date' and 'end_date' keys
+        """
+        self._init_qlib()
+        
+        if not self._qlib_initialized:
+            return {'start_date': None, 'end_date': None, 'error': 'Qlib not initialized'}
+        
+        try:
+            from qlib.data import D
+            
+            # Get a sample stock to check date range
+            # Try to get calendar/trading days from Qlib
+            instruments = D.instruments(market)
+            
+            # Get list of instruments
+            instrument_list = D.list_instruments(instruments, as_list=True)
+            if not instrument_list:
+                return {'start_date': None, 'end_date': None, 'error': f'No instruments in {market}'}
+            
+            # Get features for a sample stock to find date range
+            sample_stock = instrument_list[0]
+            df = D.features([sample_stock], fields=['$close'], 
+                           start_time='2000-01-01', end_time='2099-12-31')
+            
+            if df.empty:
+                return {'start_date': None, 'end_date': None, 'error': 'No data available'}
+            
+            # Get date range from index
+            dates = df.index.get_level_values('datetime')
+            start_date = dates.min().strftime('%Y-%m-%d')
+            end_date = dates.max().strftime('%Y-%m-%d')
+            
+            return {
+                'start_date': start_date,
+                'end_date': end_date,
+                'num_instruments': len(instrument_list)
+            }
+        except Exception as e:
+            logger.error(f"Failed to get data date range: {e}")
+            return {'start_date': None, 'end_date': None, 'error': str(e)}
     
     def train_all_models(self, **kwargs) -> Dict[str, Any]:
         """
@@ -225,8 +276,10 @@ class QlibTrainer:
         except Exception as e:
             result['status'] = 'failed'
             result['error'] = str(e)
+            result['traceback'] = traceback.format_exc()
             result['end_time'] = datetime.now().isoformat()
             logger.error(f"Training failed for {model_name}: {e}")
+            logger.error(traceback.format_exc())
             self._save_training_history(result)
         
         return result
@@ -511,7 +564,14 @@ class QlibTrainer:
             data = pickle.load(f)
         
         logger.info(f"Loaded model from: {model_path}")
-        return data.get('model'), data.get('config')
+        
+        # Handle both old format (just model) and new format (dict with model and config)
+        if isinstance(data, dict):
+            return data.get('model'), data.get('config')
+        else:
+            # Old format: data is the model itself
+            logger.warning(f"Model saved in old format without config: {model_path}")
+            return data, None
     
     def predict_stocks(
         self,
@@ -626,6 +686,153 @@ class QlibTrainer:
         else:
             return [{'stock_code': code, 'prediction': None, 'error': 'Prediction failed'} for code in stock_codes]
     
+    def predict_stocks_with_model(
+        self,
+        model_filename: str,
+        stock_codes: List[str],
+        predict_date: str = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Run predictions for a list of stocks using a specific model file.
+        
+        Args:
+            model_filename: The filename of the model (e.g., 'alpha158_lgbmodel_horizon1_20240101_120000.pkl')
+            stock_codes: List of stock codes to predict
+            predict_date: Date to predict for (default: latest available)
+            
+        Returns:
+            List of prediction dictionaries with stock_code and prediction
+        """
+        self._init_qlib()
+        
+        from qlib.data.dataset import DatasetH
+        from qlib.utils import init_instance_by_config
+        
+        # Load the model directly from filename
+        models_dir = os.path.join(self.train_output_path, 'models')
+        
+        # Ensure filename ends with .pkl
+        if not model_filename.endswith('.pkl'):
+            model_filename = model_filename + '.pkl'
+        
+        model_path = os.path.join(models_dir, model_filename)
+        
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model not found: {model_filename}")
+        
+        with open(model_path, 'rb') as f:
+            data = pickle.load(f)
+        
+        # Handle both old and new format
+        if isinstance(data, dict):
+            model = data.get('model')
+            train_config = data.get('config')
+        else:
+            model = data
+            train_config = None
+        
+        if model is None:
+            raise ValueError(f"Failed to load model from {model_filename}")
+        
+        # Parse model info from filename to get feature_set and horizon
+        # Format: feature_set_model_type_horizonN_timestamp.pkl
+        name_parts = model_filename.replace('.pkl', '').split('_')
+        
+        # Determine feature_set
+        if 'alpha158' in model_filename:
+            feature_set = FeatureSet.ALPHA158
+        elif 'alpha360' in model_filename:
+            feature_set = FeatureSet.ALPHA360
+        else:
+            feature_set = FeatureSet.ALPHA158  # default
+        
+        # Determine horizon from filename
+        horizon = PredictionHorizon.DAY_1  # default
+        for part in name_parts:
+            if part.startswith('horizon'):
+                try:
+                    h_val = int(part.replace('horizon', ''))
+                    horizon = PredictionHorizon(h_val)
+                except (ValueError, KeyError):
+                    pass
+        
+        # Override with config values if available
+        if train_config:
+            feature_set = train_config.feature_set
+            horizon = train_config.horizon
+        
+        logger.info(f"Loaded model {model_filename}: feature_set={feature_set.value}, horizon={horizon.value}")
+        
+        # Determine date range for prediction
+        from datetime import datetime, timedelta
+        if predict_date:
+            end_date = predict_date
+        else:
+            end_date = datetime.now().strftime("%Y-%m-%d")
+        
+        # Need enough history for feature computation
+        start_date = (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=120)).strftime("%Y-%m-%d")
+        
+        # Get fit times from training config for consistent normalization
+        if train_config:
+            fit_start = train_config.train_start
+            fit_end = train_config.train_end
+        else:
+            fit_start = "2017-01-01"
+            fit_end = "2022-12-31"
+        
+        # Create handler config for the specific stocks
+        handler_config = self._get_handler_config_for_stocks(
+            feature_set=feature_set,
+            horizon=horizon,
+            stock_codes=stock_codes,
+            start_date=start_date,
+            end_date=end_date,
+            fit_start=fit_start,
+            fit_end=fit_end,
+        )
+        
+        # Create dataset for prediction
+        dataset_config = {
+            "class": "DatasetH",
+            "module_path": "qlib.data.dataset",
+            "kwargs": {
+                "handler": handler_config,
+                "segments": {
+                    "test": (start_date, end_date),
+                },
+            },
+        }
+        
+        dataset = init_instance_by_config(dataset_config)
+        
+        # Run prediction
+        predictions_series = model.predict(dataset, segment="test")
+        
+        # Get the latest predictions for each stock
+        if predictions_series is not None and len(predictions_series) > 0:
+            latest_predictions = predictions_series.groupby(level='instrument').last()
+            
+            results = []
+            for stock_code in stock_codes:
+                if stock_code in latest_predictions.index:
+                    pred_value = float(latest_predictions[stock_code])
+                    results.append({
+                        'stock_code': stock_code,
+                        'prediction': pred_value,
+                    })
+                else:
+                    results.append({
+                        'stock_code': stock_code,
+                        'prediction': None,
+                        'error': 'No data available'
+                    })
+            
+            results.sort(key=lambda x: x.get('prediction') or float('-inf'), reverse=True)
+            return results
+        else:
+            return [{'stock_code': code, 'prediction': None, 'error': 'Prediction failed'} for code in stock_codes]
+    
     def _get_handler_config_for_stocks(
         self,
         feature_set: FeatureSet,
@@ -728,6 +935,28 @@ class QlibTrainer:
         if finetune_end is None:
             finetune_end = datetime.now().strftime('%Y-%m-%d')
         
+        # Check data availability before proceeding
+        market = kwargs.get('market', original_config.market if original_config else 'csi300')
+        data_range = self.get_data_date_range(market)
+        if data_range.get('start_date') and data_range.get('end_date'):
+            data_start = data_range['start_date']
+            data_end = data_range['end_date']
+            logger.info(f"Available data range for {market}: {data_start} to {data_end}")
+            
+            # Calculate extended end date needed for label calculation
+            from datetime import datetime as dt, timedelta
+            end_date_dt = dt.strptime(finetune_end, "%Y-%m-%d")
+            extended_end_dt = end_date_dt + timedelta(days=horizon.value + 4)
+            
+            if finetune_start < data_start or extended_end_dt.strftime('%Y-%m-%d') > data_end:
+                return {
+                    'status': 'failed',
+                    'error': f'Date range out of available data. Available: {data_start} to {data_end}. '
+                            f'Requested: {finetune_start} to {finetune_end} (needs data until '
+                            f'{extended_end_dt.strftime("%Y-%m-%d")} for label calculation).',
+                    'message': 'Please adjust your date range or download more recent data.'
+                }
+        
         finetune_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         model_name = f"{feature_set.value}_{model_type.value}_horizon{horizon.value}"
         
@@ -766,8 +995,10 @@ class QlibTrainer:
         except Exception as e:
             result['status'] = 'failed'
             result['error'] = str(e)
+            result['traceback'] = traceback.format_exc()
             result['end_time'] = datetime.now().isoformat()
             logger.error(f"Finetuning failed for {model_name}: {e}")
+            logger.error(traceback.format_exc())
             self._save_training_history(result)
         
         return result
@@ -816,50 +1047,95 @@ class QlibTrainer:
         else:
             handler_class = "Alpha360"
         
+        # Need to extend end_time to accommodate label calculation
+        # Label uses Ref($close, -N) which needs N days of future data
+        from datetime import datetime as dt, timedelta
+        end_date_dt = dt.strptime(finetune_end, "%Y-%m-%d")
+        extended_end = (end_date_dt + timedelta(days=horizon.value + 10)).strftime("%Y-%m-%d")
+        
         handler_config = {
             "class": handler_class,
             "module_path": "qlib.contrib.data.handler",
             "kwargs": {
                 "start_time": finetune_start,
-                "end_time": finetune_end,
+                "end_time": extended_end,  # Extended to have data for label calculation
                 "fit_start_time": finetune_start,
                 "fit_end_time": finetune_end,
                 "instruments": market,
                 "label": ([label_expr], ["LABEL0"]),
+                "learn_processors": [
+                    {"class": "DropnaLabel"},
+                ],
+                "infer_processors": [
+                    {"class": "ProcessInf", "kwargs": {}},
+                    {"class": "ZScoreNorm", "kwargs": {}},
+                    {"class": "Fillna", "kwargs": {}},
+                ],
             },
         }
         
-        # Create dataset for finetuning - need train segment for LGBModel.finetune
+        # Create dataset for finetuning - LGBModel.finetune requires both train and valid segments
+        # Split the finetune period: 80% train, 20% valid
+        from datetime import datetime as dt, timedelta
+        start_dt = dt.strptime(finetune_start, "%Y-%m-%d")
+        end_dt = dt.strptime(finetune_end, "%Y-%m-%d")
+        total_days = (end_dt - start_dt).days
+        train_days = int(total_days * 0.8)
+        split_date = (start_dt + timedelta(days=train_days)).strftime("%Y-%m-%d")
+        valid_start_date = (start_dt + timedelta(days=train_days + 1)).strftime("%Y-%m-%d")
+        
         dataset_config = {
             "class": "DatasetH",
             "module_path": "qlib.data.dataset",
             "kwargs": {
                 "handler": handler_config,
                 "segments": {
-                    "train": (finetune_start, finetune_end),
+                    "train": (finetune_start, split_date),
+                    "valid": (valid_start_date, finetune_end),
                 },
             },
         }
         
+        logger.info(f"Creating finetune dataset: train={finetune_start} to {split_date}, valid={valid_start_date} to {finetune_end}, extended_end={extended_end}")
         dataset = init_instance_by_config(dataset_config)
+        
+        # Check if dataset has data
+        try:
+            train_data = dataset.prepare("train", col_set="feature")
+            if train_data is None or (hasattr(train_data, 'empty') and train_data.empty) or len(train_data) == 0:
+                raise ValueError(f"No data available for finetuning period {finetune_start} to {finetune_end}. "
+                               f"Please check if your data covers this date range.")
+            logger.info(f"Finetune dataset has {len(train_data)} samples")
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to prepare finetune dataset: {e}")
+            raise ValueError(f"Failed to prepare finetune dataset: {e}. "
+                           f"Check if data exists for {finetune_start} to {finetune_end}")
         
         # Finetuning
         experiment_name = f"{model_name}_finetune_{finetune_id}"
         with R.start(experiment_name=experiment_name):
-            # For LGBModel, we use finetune method or retrain
-            # For Transformer, we continue training
+            # For LGBModel, the finetune() method has bugs in some Qlib versions
+            # So we retrain with the new data instead
             if model_type == ModelType.LGBMODEL:
-                # LGBModel has a finetune method that adds more trees
-                if hasattr(model, 'finetune') and model.model is not None:
-                    model.finetune(dataset, num_boost_round=10, verbose_eval=20)
-                else:
-                    # Fallback: retrain from scratch with a new model
-                    from qlib.contrib.model.gbdt import LGBModel as QlibLGBModel
-                    model = QlibLGBModel(loss="mse")
-                    # For full retraining, we need valid segment
-                    dataset_config["kwargs"]["segments"]["valid"] = (finetune_start, finetune_end)
-                    dataset = init_instance_by_config(dataset_config)
-                    model.fit(dataset)
+                from qlib.contrib.model.gbdt import LGBModel as QlibLGBModel
+                # Create a new model and train on finetune data
+                # This effectively "finetunes" by training a fresh model on recent data
+                model = QlibLGBModel(
+                    loss="mse",
+                    colsample_bytree=0.8879,
+                    learning_rate=0.0421,
+                    subsample=0.8789,
+                    lambda_l1=205.6999,
+                    lambda_l2=580.9768,
+                    max_depth=8,
+                    num_leaves=210,
+                    num_threads=20,
+                    early_stopping_rounds=50,
+                    num_boost_round=200,  # Fewer rounds for finetuning
+                )
+                model.fit(dataset)
             else:
                 # Transformer - continue training with fewer epochs
                 model.fit(dataset)
@@ -1025,6 +1301,59 @@ class QlibTrainer:
                     models.append(model_info)
         
         return sorted(models, key=lambda x: x['created'], reverse=True)
+    
+    def delete_model(self, filename: str) -> Dict[str, Any]:
+        """
+        Delete a saved model file.
+        
+        Args:
+            filename: The filename of the model to delete (e.g., 'alpha158_lgbmodel_horizon1_20240101_120000.pkl')
+            
+        Returns:
+            Dictionary with status and message
+        """
+        models_dir = os.path.join(self.train_output_path, 'models')
+        
+        # Ensure filename ends with .pkl
+        if not filename.endswith('.pkl'):
+            filename = filename + '.pkl'
+        
+        filepath = os.path.join(models_dir, filename)
+        
+        # Security check: ensure the path is within models_dir
+        if not os.path.abspath(filepath).startswith(os.path.abspath(models_dir)):
+            return {
+                'status': 'error',
+                'message': 'Invalid filename'
+            }
+        
+        if not os.path.exists(filepath):
+            return {
+                'status': 'error',
+                'message': f'Model not found: {filename}'
+            }
+        
+        try:
+            os.remove(filepath)
+            logger.info(f"Deleted model: {filepath}")
+            
+            # Also try to delete associated prediction file if exists
+            pred_filename = filename.replace('.pkl', '_predictions.pkl')
+            pred_filepath = os.path.join(self.train_output_path, 'predictions', pred_filename)
+            if os.path.exists(pred_filepath):
+                os.remove(pred_filepath)
+                logger.info(f"Deleted predictions: {pred_filepath}")
+            
+            return {
+                'status': 'success',
+                'message': f'Model {filename} deleted successfully'
+            }
+        except Exception as e:
+            logger.error(f"Failed to delete model {filename}: {e}")
+            return {
+                'status': 'error',
+                'message': f'Failed to delete model: {str(e)}'
+            }
     
     def get_finetuned_models(self) -> List[Dict[str, Any]]:
         """List all finetuned models."""

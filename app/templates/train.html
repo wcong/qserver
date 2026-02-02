@@ -66,36 +66,46 @@
                     <hr>
                     <h6>Date Configuration</h6>
                     
+                    <div class="alert alert-secondary mb-3" id="data-range-info">
+                        <i class="bi bi-database"></i> <strong>Available Data:</strong>
+                        <span id="data-range-text">Loading...</span>
+                    </div>
+                    
                     <div class="row">
                         <div class="col-md-6 mb-3">
                             <label for="train_start" class="form-label">Train Start</label>
-                            <input type="date" class="form-control" id="train_start" name="train_start" value="2017-01-01">
+                            <input type="date" class="form-control" id="train_start" name="train_start">
                         </div>
                         <div class="col-md-6 mb-3">
                             <label for="train_end" class="form-label">Train End</label>
-                            <input type="date" class="form-control" id="train_end" name="train_end" value="2022-12-31">
+                            <input type="date" class="form-control" id="train_end" name="train_end">
+                            <small class="text-muted">60 days before data end</small>
                         </div>
                     </div>
                     
                     <div class="row">
                         <div class="col-md-6 mb-3">
                             <label for="valid_start" class="form-label">Valid Start</label>
-                            <input type="date" class="form-control" id="valid_start" name="valid_start" value="2023-01-01">
+                            <input type="date" class="form-control" id="valid_start" name="valid_start">
+                            <small class="text-muted">Day after train end</small>
                         </div>
                         <div class="col-md-6 mb-3">
                             <label for="valid_end" class="form-label">Valid End</label>
-                            <input type="date" class="form-control" id="valid_end" name="valid_end" value="2023-06-30">
+                            <input type="date" class="form-control" id="valid_end" name="valid_end">
+                            <small class="text-muted">Data end - horizon days</small>
                         </div>
                     </div>
                     
                     <div class="row">
                         <div class="col-md-6 mb-3">
                             <label for="test_start" class="form-label">Test Start</label>
-                            <input type="date" class="form-control" id="test_start" name="test_start" value="2023-07-01">
+                            <input type="date" class="form-control" id="test_start" name="test_start">
+                            <small class="text-muted">7 days before data end</small>
                         </div>
                         <div class="col-md-6 mb-3">
                             <label for="test_end" class="form-label">Test End</label>
-                            <input type="date" class="form-control" id="test_end" name="test_end" value="2024-12-31">
+                            <input type="date" class="form-control" id="test_end" name="test_end">
+                            <small class="text-muted">Latest available date</small>
                         </div>
                     </div>
                     
@@ -142,7 +152,12 @@
                                 <strong>{{ model.name }}</strong>
                                 <br><small class="text-muted">{{ model.timestamp if model.timestamp else 'N/A' }}</small>
                             </div>
-                            <span class="badge bg-success">Trained</span>
+                            <div>
+                                <span class="badge bg-success me-2">Trained</span>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteModel('{{ model.filename }}', '{{ model.name }}')" title="Delete model">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
                         </li>
                         {% endfor %}
                     </ul>
@@ -173,6 +188,87 @@
 {% block extra_js %}
 <script>
 let trainingInProgress = false;
+let dataMaxDate = null;
+let dataMinDate = null;
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadDataDateRange();
+    
+    // Recalculate dates when horizon changes
+    document.getElementById('horizon').addEventListener('change', updateDateDefaults);
+    document.getElementById('market').addEventListener('change', loadDataDateRange);
+});
+
+async function loadDataDateRange() {
+    const rangeText = document.getElementById('data-range-text');
+    const market = document.getElementById('market').value;
+    
+    try {
+        const response = await fetch(`/api/data/daterange?market=${market}`);
+        const data = await response.json();
+        
+        if (data.status === 'success' && data.data.start_date && data.data.end_date) {
+            dataMinDate = data.data.start_date;
+            dataMaxDate = data.data.end_date;
+            rangeText.innerHTML = `${dataMinDate} to ${dataMaxDate} (${data.data.num_instruments || 'N/A'} stocks)`;
+            rangeText.classList.remove('text-danger');
+            updateDateDefaults();
+        } else {
+            rangeText.innerHTML = data.data.error || 'Unable to determine date range';
+            rangeText.classList.add('text-danger');
+            setFallbackDates();
+        }
+    } catch (e) {
+        rangeText.innerHTML = 'Failed to load data range';
+        rangeText.classList.add('text-danger');
+        setFallbackDates();
+    }
+}
+
+function addDays(dateStr, days) {
+    const date = new Date(dateStr);
+    date.setDate(date.getDate() + days);
+    return date.toISOString().split('T')[0];
+}
+
+function updateDateDefaults() {
+    if (!dataMaxDate) return;
+    
+    const horizon = parseInt(document.getElementById('horizon').value) || 6;
+    
+    // Train: start from 2 years before max date, end 60 days before max date
+    const trainStart = addDays(dataMaxDate, -730);  // ~2 years
+    const trainEnd = addDays(dataMaxDate, -60);
+    
+    // Valid: start day after train end, end at max date - horizon days
+    const validStart = addDays(trainEnd, 1);
+    const validEnd = addDays(dataMaxDate, -horizon - 5);  // extra buffer for label calculation
+    
+    // Test: last week of available data
+    const testStart = addDays(dataMaxDate, -7);
+    const testEnd = dataMaxDate;
+    
+    // Ensure train start is not before data min date
+    const effectiveTrainStart = (dataMinDate && trainStart < dataMinDate) ? dataMinDate : trainStart;
+    
+    document.getElementById('train_start').value = effectiveTrainStart;
+    document.getElementById('train_end').value = trainEnd;
+    document.getElementById('valid_start').value = validStart;
+    document.getElementById('valid_end').value = validEnd;
+    document.getElementById('test_start').value = testStart;
+    document.getElementById('test_end').value = testEnd;
+}
+
+function setFallbackDates() {
+    // Fallback to hardcoded dates if data range fetch fails
+    document.getElementById('train_start').value = '2020-01-01';
+    document.getElementById('train_end').value = '2024-12-01';
+    document.getElementById('valid_start').value = '2024-12-02';
+    document.getElementById('valid_end').value = '2025-12-20';
+    document.getElementById('test_start').value = '2025-12-25';
+    document.getElementById('test_end').value = '2026-01-31';
+}
 
 async function startTraining() {
     if (trainingInProgress) {
@@ -315,6 +411,35 @@ async function trainAllModels() {
     }
 }
 
+async function deleteModel(filename, modelName) {
+    if (!confirm(`Are you sure you want to delete model "${modelName}"? This cannot be undone.`)) {
+        return;
+    }
+    
+    const logPre = document.getElementById('training-log');
+    
+    try {
+        const response = await fetch('/api/models/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: filename })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            logPre.textContent += `[${new Date().toISOString()}] ${data.message}\n`;
+            refreshModels();
+        } else {
+            alert(`Failed to delete model: ${data.message}`);
+            logPre.textContent += `[${new Date().toISOString()}] Error: ${data.message}\n`;
+        }
+    } catch (error) {
+        alert(`Error deleting model: ${error.message}`);
+        logPre.textContent += `[${new Date().toISOString()}] Error: ${error.message}\n`;
+    }
+}
+
 async function refreshModels() {
     try {
         const response = await fetch('/api/models');
@@ -331,7 +456,12 @@ async function refreshModels() {
                                 <strong>${model.name}</strong>
                                 <br><small class="text-muted">${model.timestamp || 'N/A'}</small>
                             </div>
-                            <span class="badge bg-success">Trained</span>
+                            <div>
+                                <span class="badge bg-success me-2">Trained</span>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteModel('${model.filename}', '${model.name}')" title="Delete model">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
                         </li>
                     `).join('')}
                 </ul>

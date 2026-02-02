@@ -1,0 +1,313 @@
+{% extends "base.html" %}
+
+{% block title %}QServer - Data Management{% endblock %}
+
+{% block content %}
+<div class="row mt-4">
+    <div class="col-12">
+        <h2><i class="bi bi-database"></i> Data Management</h2>
+        <p class="text-muted">Download and manage market data for model training</p>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <!-- Current Data Status -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-info-circle"></i> Current Data Status</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <tr>
+                        <td><strong>Status:</strong></td>
+                        <td>
+                            {% if data_status.status == 'available' %}
+                            <span class="badge bg-success">Available</span>
+                            {% elif data_status.status == 'empty' %}
+                            <span class="badge bg-warning">Empty</span>
+                            {% elif data_status.status == 'not_initialized' %}
+                            <span class="badge bg-danger">Not Initialized</span>
+                            {% else %}
+                            <span class="badge bg-secondary">{{ data_status.status }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><strong>Data Path:</strong></td>
+                        <td><code style="font-size: 0.8rem;">{{ data_status.data_path }}</code></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Files Count:</strong></td>
+                        <td>{{ data_status.files_count or 0 }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Last Update:</strong></td>
+                        <td>{{ last_update or 'Never' }}</td>
+                    </tr>
+                </table>
+                
+                <hr>
+                
+                <h6>Data Validation</h6>
+                {% if validation %}
+                <ul class="list-group list-group-flush">
+                    {% for check in validation.checks %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center py-1">
+                        {{ check.name }}
+                        {% if check.passed %}
+                        <span class="badge bg-success"><i class="bi bi-check"></i></span>
+                        {% else %}
+                        <span class="badge bg-danger"><i class="bi bi-x"></i></span>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-muted">No validation data</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Download Actions -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-cloud-download"></i> Download Data</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">
+                    Download market data from <a href="https://github.com/chenditc/investment_data" target="_blank">investment_data</a> repository.
+                </p>
+                
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i>
+                    <strong>Source:</strong> GitHub Releases<br>
+                    <small>This will download and extract the latest qlib_bin.tar.gz file.</small>
+                </div>
+                
+                <div class="d-grid gap-2">
+                    <button type="button" class="btn btn-primary btn-lg" id="download-btn" onclick="startDownload()">
+                        <i class="bi bi-download"></i> Download Latest Data
+                    </button>
+                </div>
+                
+                <div id="download-status" class="mt-3" style="display: none;">
+                    <div class="progress">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 100%"></div>
+                    </div>
+                    <p class="text-center mt-2" id="download-message">Downloading...</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mt-3">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-gear"></i> Data Source</h5>
+            </div>
+            <div class="card-body">
+                <p><strong>URL:</strong></p>
+                <code style="font-size: 0.75rem; word-break: break-all;">
+                    https://github.com/chenditc/investment_data/releases/latest/download/qlib_bin.tar.gz
+                </code>
+                <hr>
+                <p class="text-muted mb-0">
+                    <i class="bi bi-calendar"></i> Data is updated daily<br>
+                    <i class="bi bi-globe"></i> Contains China A-share market data
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Download Result -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-terminal"></i> Download Result</h5>
+            </div>
+            <div class="card-body">
+                <div id="download-result">
+                    <p class="text-muted text-center">Results will appear here after download</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Download History -->
+<div class="row mt-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-clock-history"></i> Download History (Latest 10)</h5>
+                <button class="btn btn-sm btn-outline-primary" onclick="refreshHistory()">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover" id="history-table">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>#</th>
+                                <th>Start Time</th>
+                                <th>End Time</th>
+                                <th>Status</th>
+                                <th>Region</th>
+                                <th>Files</th>
+                                <th>Message</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-tbody">
+                            {% if download_history %}
+                            {% for record in download_history %}
+                            <tr>
+                                <td>{{ loop.index }}</td>
+                                <td>{{ record.start_time[:19] if record.start_time else 'N/A' }}</td>
+                                <td>{{ record.end_time[:19] if record.end_time else 'N/A' }}</td>
+                                <td>
+                                    {% if record.status == 'completed' %}
+                                    <span class="badge bg-success">Completed</span>
+                                    {% elif record.status == 'failed' %}
+                                    <span class="badge bg-danger">Failed</span>
+                                    {% elif record.status == 'running' %}
+                                    <span class="badge bg-warning">Running</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">{{ record.status }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ record.region or 'cn' }}</td>
+                                <td>{{ record.files_count or 'N/A' }}</td>
+                                <td><small>{{ record.message[:50] if record.message else '' }}{{ '...' if record.message and record.message|length > 50 else '' }}</small></td>
+                            </tr>
+                            {% endfor %}
+                            {% else %}
+                            <tr>
+                                <td colspan="7" class="text-center text-muted">No download history yet</td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let downloadInProgress = false;
+
+async function startDownload() {
+    if (downloadInProgress) {
+        alert('Download already in progress');
+        return;
+    }
+    
+    if (!confirm('This will download and replace all existing data. Continue?')) {
+        return;
+    }
+    
+    const btn = document.getElementById('download-btn');
+    const statusDiv = document.getElementById('download-status');
+    const resultDiv = document.getElementById('download-result');
+    const messageP = document.getElementById('download-message');
+    
+    downloadInProgress = true;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Downloading...';
+    statusDiv.style.display = 'block';
+    messageP.textContent = 'Downloading data... This may take several minutes.';
+    
+    resultDiv.innerHTML = `
+        <div class="alert alert-info">
+            <div class="d-flex align-items-center">
+                <div class="spinner-border spinner-border-sm me-2"></div>
+                <div>Download in progress...</div>
+            </div>
+        </div>
+    `;
+    
+    try {
+        const response = await fetch('/api/data/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success' && data.result.status === 'completed') {
+            resultDiv.innerHTML = `
+                <div class="alert alert-success">
+                    <i class="bi bi-check-circle"></i> <strong>Download Completed!</strong>
+                    <hr>
+                    <p class="mb-1"><strong>Files:</strong> ${data.result.files_count || 'N/A'}</p>
+                    <p class="mb-1"><strong>Start:</strong> ${data.result.start_time || 'N/A'}</p>
+                    <p class="mb-0"><strong>End:</strong> ${data.result.end_time || 'N/A'}</p>
+                </div>
+            `;
+            // Refresh the page to update status
+            setTimeout(() => location.reload(), 2000);
+        } else {
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-x-circle"></i> <strong>Download Failed</strong>
+                    <hr>
+                    <p class="mb-0">${data.result?.message || data.message || 'Unknown error'}</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        resultDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle"></i> <strong>Error</strong>
+                <hr>
+                <p class="mb-0">${error.message}</p>
+            </div>
+        `;
+    } finally {
+        downloadInProgress = false;
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-download"></i> Download Latest Data';
+        statusDiv.style.display = 'none';
+    }
+}
+
+async function refreshHistory() {
+    try {
+        const response = await fetch('/api/data/history');
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            const tbody = document.getElementById('history-tbody');
+            
+            if (data.history.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No download history yet</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = data.history.map((record, index) => `
+                <tr>
+                    <td>${index + 1}</td>
+                    <td>${record.start_time ? record.start_time.substring(0, 19) : 'N/A'}</td>
+                    <td>${record.end_time ? record.end_time.substring(0, 19) : 'N/A'}</td>
+                    <td>
+                        ${record.status === 'completed' ? '<span class="badge bg-success">Completed</span>' :
+                          record.status === 'failed' ? '<span class="badge bg-danger">Failed</span>' :
+                          record.status === 'running' ? '<span class="badge bg-warning">Running</span>' :
+                          `<span class="badge bg-secondary">${record.status}</span>`}
+                    </td>
+                    <td>${record.region || 'cn'}</td>
+                    <td>${record.files_count || 'N/A'}</td>
+                    <td><small>${record.message ? record.message.substring(0, 50) + (record.message.length > 50 ? '...' : '') : ''}</small></td>
+                </tr>
+            `).join('');
+        }
+    } catch (error) {
+        console.error('Failed to refresh history:', error);
+    }
+}
+</script>
+{% endblock %}

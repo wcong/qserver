@@ -20,30 +20,30 @@
             <div class="card-body">
                 <form id="predict-form">
                     <div class="mb-3">
-                        <label for="feature_set" class="form-label">Feature Set</label>
-                        <select class="form-select" id="feature_set" name="feature_set" required>
-                            {% for fs in feature_sets %}
-                            <option value="{{ fs }}">{{ fs }}</option>
+                        <label for="model_select" class="form-label">Available Models</label>
+                        {% if models %}
+                        <select class="form-select" id="model_select" name="model_select" required>
+                            {% for model in models %}
+                            <option value="{{ model.filename }}" 
+                                    data-feature-set="{{ model.feature_set }}"
+                                    data-model-type="{{ model.model_type }}"
+                                    data-horizon="{{ model.horizon }}"
+                                    data-finetuned="{{ model.finetuned }}">
+                                {{ model.name }}
+                                {% if model.finetuned %}(finetuned){% endif %}
+                            </option>
                             {% endfor %}
                         </select>
+                        {% else %}
+                        <div class="alert alert-warning">
+                            <i class="bi bi-exclamation-triangle"></i> No trained models available.
+                            <a href="/train">Train a model first</a>.
+                        </div>
+                        {% endif %}
                     </div>
                     
-                    <div class="mb-3">
-                        <label for="model_type" class="form-label">Model Type</label>
-                        <select class="form-select" id="model_type" name="model_type" required>
-                            {% for mt in model_types %}
-                            <option value="{{ mt }}">{{ mt }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="horizon" class="form-label">Prediction Horizon</label>
-                        <select class="form-select" id="horizon" name="horizon" required>
-                            {% for h in horizons %}
-                            <option value="{{ h }}">{{ h }} day(s)</option>
-                            {% endfor %}
-                        </select>
+                    <div id="model-info" class="mb-3">
+                        <!-- Model info will be displayed here -->
                     </div>
                     
                     <div class="mb-3">
@@ -160,6 +160,43 @@ const sampleStocks = {
 
 let predictionResults = [];
 
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    updateModelInfo();
+    
+    // Update model info when selection changes
+    const modelSelect = document.getElementById('model_select');
+    if (modelSelect) {
+        modelSelect.addEventListener('change', updateModelInfo);
+    }
+});
+
+function updateModelInfo() {
+    const select = document.getElementById('model_select');
+    const infoDiv = document.getElementById('model-info');
+    
+    if (!select || !infoDiv) return;
+    
+    const selectedOption = select.options[select.selectedIndex];
+    if (selectedOption) {
+        const featureSet = selectedOption.dataset.featureSet || 'N/A';
+        const modelType = selectedOption.dataset.modelType || 'N/A';
+        const horizon = selectedOption.dataset.horizon || 'N/A';
+        const finetuned = selectedOption.dataset.finetuned === 'True';
+        
+        infoDiv.innerHTML = `
+            <div class="alert alert-info py-2">
+                <small>
+                    <strong>Feature Set:</strong> ${featureSet}<br>
+                    <strong>Model Type:</strong> ${modelType}<br>
+                    <strong>Horizon:</strong> ${horizon} day(s)<br>
+                    ${finetuned ? '<span class="badge bg-warning text-dark">Finetuned</span>' : ''}
+                </small>
+            </div>
+        `;
+    }
+}
+
 function addSampleStocks(category) {
     const textarea = document.getElementById('stock_codes');
     const stocks = sampleStocks[category] || [];
@@ -185,11 +222,20 @@ async function runPrediction() {
     const resultsContainer = document.getElementById('results-container');
     
     // Get form values
-    const featureSet = document.getElementById('feature_set').value;
-    const modelType = document.getElementById('model_type').value;
-    const horizon = document.getElementById('horizon').value;
+    const modelSelect = document.getElementById('model_select');
+    if (!modelSelect) {
+        alert('No models available. Please train a model first.');
+        return;
+    }
+    
+    const modelFilename = modelSelect.value;
     const predictDate = document.getElementById('predict_date').value;
     const stockCodesText = document.getElementById('stock_codes').value.trim();
+    
+    if (!modelFilename) {
+        alert('Please select a model');
+        return;
+    }
     
     if (!stockCodesText) {
         alert('Please enter at least one stock code');
@@ -215,9 +261,7 @@ async function runPrediction() {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                feature_set: featureSet,
-                model_type: modelType,
-                horizon: parseInt(horizon),
+                model_filename: modelFilename,
                 predict_date: predictDate,
                 stock_codes: stockCodes
             })

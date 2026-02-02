@@ -77,6 +77,11 @@
                     <small class="text-muted">End date for finetuning data</small>
                 </div>
                 
+                <div class="alert alert-secondary mb-3" id="data-range-info">
+                    <i class="bi bi-database"></i> <strong>Available Data:</strong>
+                    <span id="data-range-text">Loading...</span>
+                </div>
+                
                 <hr>
                 
                 <div class="alert alert-info">
@@ -191,7 +196,28 @@ document.querySelectorAll('input[name="selected_model"]').forEach(radio => {
 });
 
 // Initialize on page load
-document.addEventListener('DOMContentLoaded', updateModelInfo);
+document.addEventListener('DOMContentLoaded', function() {
+    updateModelInfo();
+    loadDataDateRange();
+});
+
+async function loadDataDateRange() {
+    const rangeText = document.getElementById('data-range-text');
+    try {
+        const response = await fetch('/api/data/daterange?market=csi300');
+        const data = await response.json();
+        if (data.status === 'success' && data.data.start_date && data.data.end_date) {
+            rangeText.innerHTML = `${data.data.start_date} to ${data.data.end_date} (${data.data.num_instruments || 'N/A'} stocks)`;
+            rangeText.classList.remove('text-danger');
+        } else {
+            rangeText.innerHTML = data.data.error || 'Unable to determine date range';
+            rangeText.classList.add('text-danger');
+        }
+    } catch (e) {
+        rangeText.innerHTML = 'Failed to load data range';
+        rangeText.classList.add('text-danger');
+    }
+}
 
 function updateModelInfo() {
     const selected = document.querySelector('input[name="selected_model"]:checked');

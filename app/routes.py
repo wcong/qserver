@@ -44,17 +44,31 @@ def dashboard():
     return render_template('dashboard.html', **context)
 
 
+@main_bp.route('/data')
+def data_page():
+    """Data management page."""
+    data_manager = DataManager()
+    
+    context = {
+        'data_status': data_manager.get_data_status(),
+        'last_update': data_manager.get_last_update_time(),
+        'validation': data_manager.validate_data(),
+        'download_history': data_manager.get_download_history(),
+    }
+    return render_template('data.html', **context)
+
+
 @main_bp.route('/predict')
 def predict_page():
     """Stock prediction page."""
     from datetime import date
     trainer = QlibTrainer()
     
+    # Get all models including finetuned ones
+    models = trainer.list_models()
+    
     context = {
-        'models': trainer.list_models(),
-        'feature_sets': [fs.value for fs in FeatureSet],
-        'model_types': [mt.value for mt in ModelType],
-        'horizons': [h.value for h in PredictionHorizon],
+        'models': models,
         'today': date.today().isoformat(),
     }
     return render_template('predict.html', **context)
@@ -118,9 +132,7 @@ def run_prediction():
         data = request.get_json(force=True, silent=True) or {}
         
         # Get parameters
-        feature_set = FeatureSet(data.get('feature_set', 'alpha158'))
-        model_type = ModelType(data.get('model_type', 'lgbmodel'))
-        horizon = PredictionHorizon(int(data.get('horizon', 1)))
+        model_filename = data.get('model_filename')  # New: use model filename directly
         predict_date = data.get('predict_date')
         stock_codes = data.get('stock_codes', [])
         
@@ -130,16 +142,20 @@ def run_prediction():
                 'message': 'No stock codes provided'
             }), 400
         
-        # Run prediction
-        predictions = trainer.predict_stocks(
-            feature_set=feature_set,
-            model_type=model_type,
-            horizon=horizon,
+        if not model_filename:
+            return jsonify({
+                'status': 'error',
+                'message': 'No model selected'
+            }), 400
+        
+        # Run prediction using model filename
+        predictions = trainer.predict_stocks_with_model(
+            model_filename=model_filename,
             stock_codes=stock_codes,
             predict_date=predict_date,
         )
         
-        model_name = f"{feature_set.value}_{model_type.value}_horizon{horizon.value}"
+        model_name = model_filename.replace('.pkl', '')
         
         return jsonify({
             'status': 'success',
@@ -307,6 +323,42 @@ def download_data():
         }), 500
 
 
+@main_bp.route('/api/data/daterange')
+def data_date_range():
+    """API endpoint to get available data date range."""
+    try:
+        trainer = QlibTrainer()
+        market = request.args.get('market', 'csi300')
+        date_range = trainer.get_data_date_range(market)
+        return jsonify({
+            'status': 'success',
+            'data': date_range
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@main_bp.route('/api/data/history')
+def data_history():
+    """API endpoint to get download history."""
+    try:
+        data_manager = DataManager()
+        history = data_manager.get_download_history()
+        return jsonify({
+            'status': 'success',
+            'history': history,
+            'count': len(history)
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
 @main_bp.route('/api/models')
 def list_models():
     """API endpoint to list trained models."""
@@ -318,6 +370,33 @@ def list_models():
             'models': models,
             'count': len(models)
         })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@main_bp.route('/api/models/delete', methods=['POST'])
+def delete_model():
+    """API endpoint to delete a trained model."""
+    try:
+        trainer = QlibTrainer()
+        data = request.get_json(force=True, silent=True) or {}
+        
+        filename = data.get('filename')
+        if not filename:
+            return jsonify({
+                'status': 'error',
+                'message': 'filename is required'
+            }), 400
+        
+        result = trainer.delete_model(filename)
+        
+        if result['status'] == 'success':
+            return jsonify(result)
+        else:
+            return jsonify(result), 400
     except Exception as e:
         return jsonify({
             'status': 'error',

@@ -23,6 +23,8 @@ DEFAULT_CN_DATA_PATH = "/app/data/stock/cn_data"
 class DataManager:
     """Manager class for Qlib data operations."""
     
+    MAX_DOWNLOAD_HISTORY = 10
+    
     def __init__(self, data_path: str = None):
         """
         Initialize the DataManager.
@@ -32,6 +34,7 @@ class DataManager:
         """
         self.data_path = data_path or os.environ.get('QLIB_DATA_PATH', DEFAULT_CN_DATA_PATH)
         self.status_file = os.path.join(os.path.dirname(self.data_path), 'data_status.json')
+        self.history_file = os.path.join(os.path.dirname(self.data_path), 'download_history.json')
         
         # Ensure directory exists
         os.makedirs(self.data_path, exist_ok=True)
@@ -252,6 +255,37 @@ class DataManager:
                 json.dump(status, f, indent=2)
         except IOError as e:
             logger.error(f"Failed to update status file: {e}")
+        
+        # Also update download history
+        self._add_to_history(status)
+    
+    def _add_to_history(self, record: Dict[str, Any]):
+        """Add a download record to history, keeping only the latest MAX_DOWNLOAD_HISTORY entries."""
+        history = self.get_download_history()
+        history.insert(0, record)  # Add to beginning
+        history = history[:self.MAX_DOWNLOAD_HISTORY]  # Keep only latest 10
+        
+        try:
+            os.makedirs(os.path.dirname(self.history_file), exist_ok=True)
+            with open(self.history_file, 'w') as f:
+                json.dump(history, f, indent=2)
+        except IOError as e:
+            logger.error(f"Failed to update history file: {e}")
+    
+    def get_download_history(self) -> list:
+        """
+        Get download history (latest 10 downloads).
+        
+        Returns:
+            List of download records
+        """
+        if os.path.exists(self.history_file):
+            try:
+                with open(self.history_file, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                pass
+        return []
     
     def validate_data(self) -> Dict[str, Any]:
         """
