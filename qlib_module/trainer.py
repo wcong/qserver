@@ -64,6 +64,8 @@ class TrainingConfig:
     # Transformer-specific parameters
     num_layers: int = 12
     early_stop: int = 200
+    batch_size: int = 8192      # Larger batch = more GPU memory usage
+    d_model: int = 512          # Model dimension (256, 512, 768, 1024)
     
     def get_model_name(self) -> str:
         """Generate model name from configuration."""
@@ -483,14 +485,14 @@ class QlibTrainer:
                 "module_path": "qlib.contrib.model.pytorch_transformer",
                 "kwargs": {
                     "d_feat": d_feat,
-                    "d_model": 256,  #  dimensionality of the model - the size of the embedding vectors that flow through the transformer. Typical values: 256, 512, 768, 1024
+                    "d_model": config.d_model,  # Dimensionality of model embeddings. Higher = more GPU memory
                     "nhead": 8,
                     "num_layers": config.num_layers,  # Typical values: 2-12 for most tasks, up to 96 for large models like GPT-4
                     "dropout": 0.3,
                     "n_epochs": 300,        # Increased from 100 - more training epochs
                     "lr": 0.0001,
                     "early_stop": config.early_stop,       # Number of epochs with no improvement before early stop
-                    "batch_size": 1024,
+                    "batch_size": config.batch_size,  # Larger batch = more GPU memory usage
                     "metric": "loss",
                     "loss": "mse",
                     "GPU": 0,

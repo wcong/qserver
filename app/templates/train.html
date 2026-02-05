@@ -39,17 +39,48 @@
                     
                     <!-- Transformer-specific options -->
                     <div id="transformer-options" style="display: none;">
+                        <div class="alert alert-info py-2 mb-2">
+                            <small><i class="bi bi-gpu-card"></i> <strong>A10 GPU (24GB)</strong> recommended settings below</small>
+                        </div>
                         <div class="row">
                             <div class="col-6 mb-2">
-                                <label for="num_layers" class="form-label small">Num Layers</label>
+                                <label for="num_layers" class="form-label small" title="Number of stacked transformer encoder blocks. More layers = deeper network = can learn more complex patterns, but uses more memory and trains slower.">
+                                    Num Layers <i class="bi bi-info-circle text-muted"></i>
+                                </label>
                                 <input type="number" class="form-control form-control-sm" id="num_layers" name="num_layers" value="12" min="1" max="96">
-                                <small class="text-muted">Typical: 2-12</small>
+                                <small class="text-muted">A10: 12-24 | More = deeper</small>
                             </div>
                             <div class="col-6 mb-2">
-                                <label for="early_stop" class="form-label small">Early Stop</label>
+                                <label for="early_stop" class="form-label small" title="Number of epochs without improvement before stopping training early. Higher = more patience, may find better optima but takes longer.">
+                                    Early Stop <i class="bi bi-info-circle text-muted"></i>
+                                </label>
                                 <input type="number" class="form-control form-control-sm" id="early_stop" name="early_stop" value="200" min="1">
-                                <small class="text-muted">Patience epochs</small>
+                                <small class="text-muted">A10: 200-300 | Patience</small>
                             </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-6 mb-2">
+                                <label for="batch_size" class="form-label small" title="Number of samples processed in one forward/backward pass. Larger batch = more GPU memory usage, faster training, but may need learning rate tuning.">
+                                    Batch Size <i class="bi bi-info-circle text-muted"></i>
+                                </label>
+                                <input type="number" class="form-control form-control-sm" id="batch_size" name="batch_size" value="16384" min="256" step="256">
+                                <small class="text-muted">A10: 16384-32768 | ↑ GPU mem</small>
+                            </div>
+                            <div class="col-6 mb-2">
+                                <label for="d_model" class="form-label small" title="Dimensionality of the model embeddings. All internal layers operate on vectors of this size. Higher = more expressive but uses more memory.">
+                                    D Model <i class="bi bi-info-circle text-muted"></i>
+                                </label>
+                                <select class="form-select form-select-sm" id="d_model" name="d_model">
+                                    <option value="256">256 (light)</option>
+                                    <option value="512">512 (balanced)</option>
+                                    <option value="768" selected>768 (A10 recommended)</option>
+                                    <option value="1024">1024 (heavy)</option>
+                                </select>
+                                <small class="text-muted">A10: 768-1024 | Embed dim</small>
+                            </div>
+                        </div>
+                        <div class="small text-muted mb-2 px-1">
+                            <i class="bi bi-lightbulb"></i> <strong>Tips:</strong> Start with defaults. If GPU memory &lt;80%, increase batch_size first, then d_model. Monitor with <code>nvidia-smi</code>.
                         </div>
                     </div>
                     
@@ -318,6 +349,8 @@ async function startTraining() {
         // Transformer-specific parameters
         num_layers: parseInt(document.getElementById('num_layers').value) || 12,
         early_stop: parseInt(document.getElementById('early_stop').value) || 200,
+        batch_size: parseInt(document.getElementById('batch_size').value) || 8192,
+        d_model: parseInt(document.getElementById('d_model').value) || 512,
     };
     
     const modelName = `${formData.feature_set}_${formData.model_type}_horizon${formData.horizon}`;

@@ -202,6 +202,8 @@ def start_training():
             # Transformer-specific parameters
             num_layers=int(data.get('num_layers', 12)),
             early_stop=int(data.get('early_stop', 200)),
+            batch_size=int(data.get('batch_size', 8192)),
+            d_model=int(data.get('d_model', 512)),
         )
         
         result = trainer.train_model(config)
