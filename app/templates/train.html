@@ -30,11 +30,27 @@
                     
                     <div class="mb-2">
                         <label for="model_type" class="form-label">Model Type</label>
-                        <select class="form-select form-select-sm" id="model_type" name="model_type" required>
+                        <select class="form-select form-select-sm" id="model_type" name="model_type" required onchange="toggleTransformerOptions()">
                             {% for mt in model_types %}
                             <option value="{{ mt }}">{{ mt }}</option>
                             {% endfor %}
                         </select>
+                    </div>
+                    
+                    <!-- Transformer-specific options -->
+                    <div id="transformer-options" style="display: none;">
+                        <div class="row">
+                            <div class="col-6 mb-2">
+                                <label for="num_layers" class="form-label small">Num Layers</label>
+                                <input type="number" class="form-control form-control-sm" id="num_layers" name="num_layers" value="12" min="1" max="96">
+                                <small class="text-muted">Typical: 2-12</small>
+                            </div>
+                            <div class="col-6 mb-2">
+                                <label for="early_stop" class="form-label small">Early Stop</label>
+                                <input type="number" class="form-control form-control-sm" id="early_stop" name="early_stop" value="200" min="1">
+                                <small class="text-muted">Patience epochs</small>
+                            </div>
+                        </div>
                     </div>
                     
                     <div class="mb-2">
@@ -191,11 +207,22 @@ let dataMinDate = null;
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     loadDataDateRange();
+    toggleTransformerOptions();
     
     // Recalculate dates when horizon changes
     document.getElementById('horizon').addEventListener('change', updateDateDefaults);
     document.getElementById('market').addEventListener('change', loadDataDateRange);
 });
+
+function toggleTransformerOptions() {
+    const modelType = document.getElementById('model_type').value;
+    const transformerOptions = document.getElementById('transformer-options');
+    if (modelType === 'transformer') {
+        transformerOptions.style.display = 'block';
+    } else {
+        transformerOptions.style.display = 'none';
+    }
+}
 
 async function loadDataDateRange() {
     const rangeText = document.getElementById('data-range-text');
@@ -288,6 +315,9 @@ async function startTraining() {
         valid_end: document.getElementById('valid_end').value,
         test_start: document.getElementById('test_start').value,
         test_end: document.getElementById('test_end').value,
+        // Transformer-specific parameters
+        num_layers: parseInt(document.getElementById('num_layers').value) || 12,
+        early_stop: parseInt(document.getElementById('early_stop').value) || 200,
     };
     
     const modelName = `${formData.feature_set}_${formData.model_type}_horizon${formData.horizon}`;

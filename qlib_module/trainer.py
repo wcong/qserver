@@ -61,6 +61,9 @@ class TrainingConfig:
     valid_end: str = "2023-06-30"
     test_start: str = "2023-07-01"
     test_end: str = "2024-12-31"
+    # Transformer-specific parameters
+    num_layers: int = 12
+    early_stop: int = 200
     
     def get_model_name(self) -> str:
         """Generate model name from configuration."""
@@ -302,6 +305,9 @@ class QlibTrainer:
         from qlib.workflow import R
         from qlib.workflow.record_temp import SignalRecord
         
+        # Capture training start time
+        train_start_time = datetime.now()
+        
         model_name = config.get_model_name()
         
         # Get data handler config based on feature set
@@ -369,7 +375,7 @@ class QlibTrainer:
             'feature_set': config.feature_set.value,
             'model_type': config.model_type.value,
             'horizon': config.horizon.value,
-            'start_time': datetime.now().isoformat(),
+            'start_time': train_start_time.isoformat(),
             'end_time': datetime.now().isoformat(),
             'status': 'completed',
             'model_path': model_save_path,
@@ -477,13 +483,13 @@ class QlibTrainer:
                 "module_path": "qlib.contrib.model.pytorch_transformer",
                 "kwargs": {
                     "d_feat": d_feat,
-                    "d_model": 128,
+                    "d_model": 256,  #  dimensionality of the model - the size of the embedding vectors that flow through the transformer. Typical values: 256, 512, 768, 1024
                     "nhead": 8,
-                    "num_layers": 10,
+                    "num_layers": config.num_layers,  # Typical values: 2-12 for most tasks, up to 96 for large models like GPT-4
                     "dropout": 0.3,
                     "n_epochs": 300,        # Increased from 100 - more training epochs
                     "lr": 0.0001,
-                    "early_stop": 50,       # Increased from 20 - more patience before early stop
+                    "early_stop": config.early_stop,       # Number of epochs with no improvement before early stop
                     "batch_size": 1024,
                     "metric": "loss",
                     "loss": "mse",
@@ -1036,6 +1042,9 @@ class QlibTrainer:
         from qlib.utils import init_instance_by_config
         from qlib.workflow import R
         
+        # Capture finetuning start time
+        finetune_start_time = datetime.now()
+        
         model_name = f"{feature_set.value}_{model_type.value}_horizon{horizon.value}"
         market = kwargs.get('market', original_config.market if original_config else 'csi300')
         
@@ -1181,7 +1190,7 @@ class QlibTrainer:
             'horizon': horizon.value,
             'finetune_start': finetune_start,
             'finetune_end': finetune_end,
-            'start_time': datetime.now().isoformat(),
+            'start_time': finetune_start_time.isoformat(),
             'end_time': datetime.now().isoformat(),
             'status': 'completed',
             'model_path': model_save_path,

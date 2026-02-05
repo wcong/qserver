@@ -199,6 +199,9 @@ def start_training():
             valid_end=data.get('valid_end', '2023-06-30'),
             test_start=data.get('test_start', '2023-07-01'),
             test_end=data.get('test_end', '2024-12-31'),
+            # Transformer-specific parameters
+            num_layers=int(data.get('num_layers', 12)),
+            early_stop=int(data.get('early_stop', 200)),
         )
         
         result = trainer.train_model(config)
