@@ -200,10 +200,11 @@ def start_training():
             test_start=data.get('test_start', '2023-07-01'),
             test_end=data.get('test_end', '2024-12-31'),
             # Transformer-specific parameters
-            num_layers=int(data.get('num_layers', 12)),
-            early_stop=int(data.get('early_stop', 200)),
-            batch_size=int(data.get('batch_size', 8192)),
-            d_model=int(data.get('d_model', 512)),
+            num_layers=int(data.get('num_layers', 8)),
+            early_stop=int(data.get('early_stop', 30)),
+            batch_size=int(data.get('batch_size', 4096)),
+            d_model=int(data.get('d_model', 256)),
+            learning_rate=float(data.get('learning_rate', 0.0001)),
         )
         
         result = trainer.train_model(config)

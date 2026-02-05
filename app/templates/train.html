@@ -39,23 +39,23 @@
                     
                     <!-- Transformer-specific options -->
                     <div id="transformer-options" style="display: none;">
-                        <div class="alert alert-info py-2 mb-2">
-                            <small><i class="bi bi-gpu-card"></i> <strong>A10 GPU (24GB)</strong> recommended settings below</small>
+                        <div class="alert alert-warning py-2 mb-2">
+                            <small><i class="bi bi-exclamation-triangle"></i> <strong>Stability first:</strong> Start with defaults, then gradually increase for A10 GPU</small>
                         </div>
                         <div class="row">
                             <div class="col-6 mb-2">
                                 <label for="num_layers" class="form-label small" title="Number of stacked transformer encoder blocks. More layers = deeper network = can learn more complex patterns, but uses more memory and trains slower.">
                                     Num Layers <i class="bi bi-info-circle text-muted"></i>
                                 </label>
-                                <input type="number" class="form-control form-control-sm" id="num_layers" name="num_layers" value="12" min="1" max="96">
-                                <small class="text-muted">A10: 12-24 | More = deeper</small>
+                                <input type="number" class="form-control form-control-sm" id="num_layers" name="num_layers" value="8" min="1" max="24">
+                                <small class="text-muted">Safe: 4-8 | A10: up to 12</small>
                             </div>
                             <div class="col-6 mb-2">
                                 <label for="early_stop" class="form-label small" title="Number of epochs without improvement before stopping training early. Higher = more patience, may find better optima but takes longer.">
                                     Early Stop <i class="bi bi-info-circle text-muted"></i>
                                 </label>
-                                <input type="number" class="form-control form-control-sm" id="early_stop" name="early_stop" value="200" min="1">
-                                <small class="text-muted">A10: 200-300 | Patience</small>
+                                <input type="number" class="form-control form-control-sm" id="early_stop" name="early_stop" value="30" min="5">
+                                <small class="text-muted">Safe: 20-50 | Patient: 100+</small>
                             </div>
                         </div>
                         <div class="row">
@@ -63,24 +63,40 @@
                                 <label for="batch_size" class="form-label small" title="Number of samples processed in one forward/backward pass. Larger batch = more GPU memory usage, faster training, but may need learning rate tuning.">
                                     Batch Size <i class="bi bi-info-circle text-muted"></i>
                                 </label>
-                                <input type="number" class="form-control form-control-sm" id="batch_size" name="batch_size" value="16384" min="256" step="256">
-                                <small class="text-muted">A10: 16384-32768 | ↑ GPU mem</small>
+                                <input type="number" class="form-control form-control-sm" id="batch_size" name="batch_size" value="4096" min="256" step="256">
+                                <small class="text-muted">Safe: 2048-4096 | A10: 8192+</small>
                             </div>
                             <div class="col-6 mb-2">
                                 <label for="d_model" class="form-label small" title="Dimensionality of the model embeddings. All internal layers operate on vectors of this size. Higher = more expressive but uses more memory.">
                                     D Model <i class="bi bi-info-circle text-muted"></i>
                                 </label>
                                 <select class="form-select form-select-sm" id="d_model" name="d_model">
-                                    <option value="256">256 (light)</option>
-                                    <option value="512">512 (balanced)</option>
-                                    <option value="768" selected>768 (A10 recommended)</option>
-                                    <option value="1024">1024 (heavy)</option>
+                                    <option value="64">64 (fast test)</option>
+                                    <option value="128">128 (light)</option>
+                                    <option value="256" selected>256 (stable)</option>
+                                    <option value="512">512 (A10 ok)</option>
+                                    <option value="768">768 (A10 heavy)</option>
                                 </select>
-                                <small class="text-muted">A10: 768-1024 | Embed dim</small>
+                                <small class="text-muted">Safe: 128-256 | A10: 512</small>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-12 mb-2">
+                                <label for="learning_rate" class="form-label small" title="Learning rate controls step size. Too high = NaN/exploding. Too low = slow learning. Scale up slightly when increasing batch_size.">
+                                    Learning Rate <i class="bi bi-info-circle text-muted"></i>
+                                </label>
+                                <select class="form-select form-select-sm" id="learning_rate" name="learning_rate">
+                                    <option value="0.00001">0.00001 (very safe)</option>
+                                    <option value="0.00005">0.00005 (safe)</option>
+                                    <option value="0.0001" selected>0.0001 (default)</option>
+                                    <option value="0.0002">0.0002 (for large batch)</option>
+                                    <option value="0.0005">0.0005 (aggressive)</option>
+                                </select>
+                                <small class="text-muted">If NaN: try 0.00005 or lower</small>
                             </div>
                         </div>
                         <div class="small text-muted mb-2 px-1">
-                            <i class="bi bi-lightbulb"></i> <strong>Tips:</strong> Start with defaults. If GPU memory &lt;80%, increase batch_size first, then d_model. Monitor with <code>nvidia-smi</code>.
+                            <i class="bi bi-lightbulb"></i> <strong>If NaN/bad scores:</strong> Lower learning_rate → Reduce batch_size → Reduce d_model → Reduce num_layers
                         </div>
                     </div>
                     
@@ -347,10 +363,11 @@ async function startTraining() {
         test_start: document.getElementById('test_start').value,
         test_end: document.getElementById('test_end').value,
         // Transformer-specific parameters
-        num_layers: parseInt(document.getElementById('num_layers').value) || 12,
-        early_stop: parseInt(document.getElementById('early_stop').value) || 200,
-        batch_size: parseInt(document.getElementById('batch_size').value) || 8192,
-        d_model: parseInt(document.getElementById('d_model').value) || 512,
+        num_layers: parseInt(document.getElementById('num_layers').value) || 8,
+        early_stop: parseInt(document.getElementById('early_stop').value) || 30,
+        batch_size: parseInt(document.getElementById('batch_size').value) || 4096,
+        d_model: parseInt(document.getElementById('d_model').value) || 256,
+        learning_rate: parseFloat(document.getElementById('learning_rate').value) || 0.0001,
     };
     
     const modelName = `${formData.feature_set}_${formData.model_type}_horizon${formData.horizon}`;

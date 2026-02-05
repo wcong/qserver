@@ -62,10 +62,11 @@ class TrainingConfig:
     test_start: str = "2023-07-01"
     test_end: str = "2024-12-31"
     # Transformer-specific parameters
-    num_layers: int = 12
-    early_stop: int = 200
-    batch_size: int = 8192      # Larger batch = more GPU memory usage
-    d_model: int = 512          # Model dimension (256, 512, 768, 1024)
+    num_layers: int = 8
+    early_stop: int = 30
+    batch_size: int = 4096      # Smaller default for stability
+    d_model: int = 256          # Smaller default for stability
+    learning_rate: float = 0.0001  # Learning rate (scale with batch_size)
     
     def get_model_name(self) -> str:
         """Generate model name from configuration."""
@@ -480,19 +481,29 @@ class QlibTrainer:
         elif config.model_type == ModelType.TRANSFORMER:
             # Determine input dimension based on feature set
             d_feat = 158 if config.feature_set == FeatureSet.ALPHA158 else 360
+            
+            # Ensure nhead divides d_model evenly
+            nhead = 8
+            if config.d_model % nhead != 0:
+                # Adjust nhead to a valid divisor
+                for nh in [8, 4, 2, 1]:
+                    if config.d_model % nh == 0:
+                        nhead = nh
+                        break
+            
             return {
                 "class": "TransformerModel",
                 "module_path": "qlib.contrib.model.pytorch_transformer",
                 "kwargs": {
                     "d_feat": d_feat,
-                    "d_model": config.d_model,  # Dimensionality of model embeddings. Higher = more GPU memory
-                    "nhead": 8,
-                    "num_layers": config.num_layers,  # Typical values: 2-12 for most tasks, up to 96 for large models like GPT-4
-                    "dropout": 0.3,
-                    "n_epochs": 300,        # Increased from 100 - more training epochs
-                    "lr": 0.0001,
-                    "early_stop": config.early_stop,       # Number of epochs with no improvement before early stop
-                    "batch_size": config.batch_size,  # Larger batch = more GPU memory usage
+                    "d_model": config.d_model,  # Dimensionality of model embeddings
+                    "nhead": nhead,
+                    "num_layers": config.num_layers,
+                    "dropout": 0.1,             # Reduced dropout for stability
+                    "n_epochs": 200,
+                    "lr": config.learning_rate,
+                    "early_stop": config.early_stop,
+                    "batch_size": config.batch_size,
                     "metric": "loss",
                     "loss": "mse",
                     "GPU": 0,
