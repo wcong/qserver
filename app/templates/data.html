@@ -362,6 +362,22 @@
                         </button>
                     </div>
                     <div class="card-body">
+                        <!-- Manual Path Input -->
+                        <div class="mb-3">
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-folder"></i></span>
+                                <input type="text" class="form-control" id="manual-path-input" 
+                                       placeholder="Enter path (e.g., features/sh600000 or features/sh600000/close.day.bin)"
+                                       onkeypress="if(event.key === 'Enter') goToManualPath();">
+                                <button class="btn btn-outline-secondary" type="button" onclick="goToManualPath()">
+                                    <i class="bi bi-arrow-right"></i> Go
+                                </button>
+                            </div>
+                            <small class="text-muted">Enter folder path to browse or .bin file path to view</small>
+                        </div>
+                        
+                        <hr>
+                        
                         <!-- Breadcrumb -->
                         <nav aria-label="breadcrumb" id="browser-breadcrumb">
                             <ol class="breadcrumb mb-2">
@@ -383,7 +399,7 @@
                         </div>
                         
                         <div id="browser-content">
-                            <div class="list-group" id="file-list" style="max-height: 500px; overflow-y: auto;">
+                            <div class="list-group" id="file-list" style="max-height: 400px; overflow-y: auto;">
                                 <p class="text-muted text-center py-4">Click "Refresh" or switch to this tab to load files</p>
                             </div>
                         </div>
