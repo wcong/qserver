@@ -1067,8 +1067,37 @@ async function loadBrowserRoot() {
     await browsePath('');
 }
 
+async function goToManualPath() {
+    const input = document.getElementById('manual-path-input');
+    let path = input.value.trim();
+    
+    if (!path) {
+        // If empty, go to root
+        await browsePath('');
+        return;
+    }
+    
+    // Remove leading/trailing slashes
+    path = path.replace(/^\/+|\/+$/g, '');
+    
+    // Check if it's a .bin file path
+    if (path.endsWith('.bin')) {
+        // View the binary file
+        viewBinFile(path);
+        // Also update the input to show the folder path
+        const folderPath = path.split('/').slice(0, -1).join('/');
+        await browsePath(folderPath);
+    } else {
+        // Browse to the folder
+        await browsePath(path);
+    }
+}
+
 async function browsePath(path) {
     currentBrowserPath = path;
+    
+    // Update the manual path input to show current path
+    document.getElementById('manual-path-input').value = path;
     
     const loadingDiv = document.getElementById('browser-loading');
     const contentDiv = document.getElementById('browser-content');
