@@ -1068,7 +1068,7 @@ function updateBreadcrumb(breadcrumb, isRoot) {
     let html = `
         <ol class="breadcrumb mb-2">
             <li class="breadcrumb-item ${isRoot ? 'active' : ''}">
-                ${isRoot ? '<i class="bi bi-house"></i> cn_data' : '<a href="#" onclick="browsePath(\\'\\'); return false;"><i class="bi bi-house"></i> cn_data</a>'}
+                ${isRoot ? '<i class="bi bi-house"></i> cn_data' : '<a href="#" onclick="browsePath(\'\'); return false;"><i class="bi bi-house"></i> cn_data</a>'}
             </li>
     `;
     
