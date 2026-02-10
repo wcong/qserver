@@ -514,3 +514,183 @@ def training_combinations():
             for fs, mt in QlibTrainer.TRAINING_COMBINATIONS
         ]
     })
+
+
+# =====================
+# Stock Crawler API
+# =====================
+
+@main_bp.route('/api/crawler/fetch', methods=['POST'])
+def crawler_fetch():
+    """API endpoint to crawl stock data in real-time."""
+    try:
+        from qlib_module.stock_crawler import StockCrawler
+        
+        data = request.get_json(force=True, silent=True) or {}
+        
+        # Get parameters
+        stock_codes = data.get('stock_codes', [])
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        
+        if not stock_codes:
+            return jsonify({
+                'status': 'error',
+                'message': 'No stock codes provided'
+            }), 400
+        
+        # Validate stock codes format - convert string to list if needed
+        if isinstance(stock_codes, str):
+            # Split by comma, semicolon, space, or newline
+            import re
+            stock_codes = [code.strip() for code in re.split(r'[,;\s\n]+', stock_codes) if code.strip()]
+        
+        if not stock_codes:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid stock codes format'
+            }), 400
+        
+        # Limit number of stocks per request
+        max_stocks = 10
+        if len(stock_codes) > max_stocks:
+            return jsonify({
+                'status': 'error',
+                'message': f'Too many stock codes. Maximum {max_stocks} per request.'
+            }), 400
+        
+        crawler = StockCrawler(delay=0.3)
+        results = {}
+        errors = []
+        
+        for code in stock_codes:
+            try:
+                df = crawler.fetch_stock_data(code, start_date, end_date)
+                if df is not None and not df.empty:
+                    formatted_code = crawler.format_stock_code(code, format_type='qlib')
+                    # Convert DataFrame to JSON-serializable format
+                    df_dict = df.copy()
+                    df_dict['date'] = df_dict['date'].dt.strftime('%Y-%m-%d')
+                    results[formatted_code] = {
+                        'records': df_dict.to_dict(orient='records'),
+                        'count': len(df_dict),
+                        'date_range': {
+                            'start': df_dict['date'].min(),
+                            'end': df_dict['date'].max()
+                        }
+                    }
+                else:
+                    errors.append({'code': code, 'error': 'No data available'})
+            except Exception as e:
+                errors.append({'code': code, 'error': str(e)})
+        
+        return jsonify({
+            'status': 'success' if results else 'error',
+            'data': results,
+            'errors': errors,
+            'success_count': len(results),
+            'error_count': len(errors)
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@main_bp.route('/api/crawler/fetch-single', methods=['POST'])
+def crawler_fetch_single():
+    """API endpoint to crawl single stock data with full details."""
+    try:
+        from qlib_module.stock_crawler import StockCrawler
+        
+        data = request.get_json(force=True, silent=True) or {}
+        
+        stock_code = data.get('stock_code', '').strip()
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        
+        if not stock_code:
+            return jsonify({
+                'status': 'error',
+                'message': 'Stock code is required'
+            }), 400
+        
+        crawler = StockCrawler(delay=0.1)
+        df = crawler.fetch_stock_data(stock_code, start_date, end_date)
+        
+        if df is None or df.empty:
+            return jsonify({
+                'status': 'error',
+                'message': f'No data available for {stock_code}'
+            }), 404
+        
+        # Convert DataFrame to JSON-serializable format
+        df_dict = df.copy()
+        df_dict['date'] = df_dict['date'].dt.strftime('%Y-%m-%d')
+        
+        formatted_code = crawler.format_stock_code(stock_code, format_type='qlib')
+        
+        return jsonify({
+            'status': 'success',
+            'stock_code': formatted_code,
+            'records': df_dict.to_dict(orient='records'),
+            'count': len(df_dict),
+            'date_range': {
+                'start': df_dict['date'].min(),
+                'end': df_dict['date'].max()
+            },
+            'columns': list(df_dict.columns)
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@main_bp.route('/api/crawler/validate-code', methods=['POST'])
+def crawler_validate_code():
+    """API endpoint to validate and normalize stock code."""
+    try:
+        from qlib_module.stock_crawler import StockCrawler
+        
+        data = request.get_json(force=True, silent=True) or {}
+        stock_code = data.get('stock_code', '').strip()
+        
+        if not stock_code:
+            return jsonify({
+                'status': 'error',
+                'message': 'Stock code is required'
+            }), 400
+        
+        market_code, pure_code = StockCrawler.normalize_stock_code(stock_code)
+        qlib_format = StockCrawler.format_stock_code(stock_code, format_type='qlib')
+        suffix_format = StockCrawler.format_stock_code(stock_code, format_type='suffix')
+        
+        # Determine market name
+        market_names = {1: 'Shanghai (SSE)', 0: 'Shenzhen (SZSE)'}
+        if pure_code.startswith(('4', '8')) and len(pure_code) == 6:
+            market_name = 'Beijing (BSE)'
+        else:
+            market_name = market_names.get(market_code, 'Unknown')
+        
+        return jsonify({
+            'status': 'success',
+            'original': stock_code,
+            'normalized': {
+                'market_code': market_code,
+                'pure_code': pure_code,
+                'qlib_format': qlib_format,
+                'suffix_format': suffix_format,
+                'market_name': market_name
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500

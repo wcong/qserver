@@ -10,44 +10,62 @@
     </div>
 </div>
 
-<div class="row mt-3">
-    <!-- Current Data Status -->
-    <div class="col-md-4">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-info-circle"></i> Current Data Status</h5>
-            </div>
-            <div class="card-body">
-                <table class="table table-sm">
-                    <tr>
-                        <td><strong>Status:</strong></td>
-                        <td>
-                            {% if data_status.status == 'available' %}
-                            <span class="badge bg-success">Available</span>
-                            {% elif data_status.status == 'empty' %}
-                            <span class="badge bg-warning">Empty</span>
-                            {% elif data_status.status == 'not_initialized' %}
-                            <span class="badge bg-danger">Not Initialized</span>
-                            {% else %}
-                            <span class="badge bg-secondary">{{ data_status.status }}</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    <tr>
-                        <td><strong>Data Path:</strong></td>
-                        <td><code style="font-size: 0.8rem;">{{ data_status.data_path }}</code></td>
-                    </tr>
-                    <tr>
-                        <td><strong>Files Count:</strong></td>
-                        <td>{{ data_status.files_count or 0 }}</td>
-                    </tr>
-                    <tr>
-                        <td><strong>Last Update:</strong></td>
-                        <td>{{ last_update or 'Never' }}</td>
-                    </tr>
-                </table>
-                
-                <hr>
+<!-- Tab Navigation -->
+<ul class="nav nav-tabs mt-3" id="dataTab" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="download-tab" data-bs-toggle="tab" data-bs-target="#download-panel" type="button" role="tab" aria-controls="download-panel" aria-selected="true">
+            <i class="bi bi-cloud-download"></i> Batch Download
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="crawler-tab" data-bs-toggle="tab" data-bs-target="#crawler-panel" type="button" role="tab" aria-controls="crawler-panel" aria-selected="false">
+            <i class="bi bi-search"></i> Real-time Crawler
+        </button>
+    </li>
+</ul>
+
+<!-- Tab Content -->
+<div class="tab-content" id="dataTabContent">
+    <!-- Download Panel -->
+    <div class="tab-pane fade show active" id="download-panel" role="tabpanel" aria-labelledby="download-tab">
+        <div class="row mt-3">
+            <!-- Current Data Status -->
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-info-circle"></i> Current Data Status</h5>
+                    </div>
+                    <div class="card-body">
+                        <table class="table table-sm">
+                            <tr>
+                                <td><strong>Status:</strong></td>
+                                <td>
+                                    {% if data_status.status == 'available' %}
+                                    <span class="badge bg-success">Available</span>
+                                    {% elif data_status.status == 'empty' %}
+                                    <span class="badge bg-warning">Empty</span>
+                                    {% elif data_status.status == 'not_initialized' %}
+                                    <span class="badge bg-danger">Not Initialized</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">{{ data_status.status }}</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td><strong>Data Path:</strong></td>
+                                <td><code style="font-size: 0.8rem;">{{ data_status.data_path }}</code></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Files Count:</strong></td>
+                                <td>{{ data_status.files_count or 0 }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Last Update:</strong></td>
+                                <td>{{ last_update or 'Never' }}</td>
+                            </tr>
+                        </table>
+                        
+                        <hr>
                 
                 <h6>Data Validation</h6>
                 {% if validation %}
@@ -194,11 +212,143 @@
         </div>
     </div>
 </div>
+    </div>
+    <!-- End Download Panel -->
+
+    <!-- Crawler Panel -->
+    <div class="tab-pane fade" id="crawler-panel" role="tabpanel" aria-labelledby="crawler-tab">
+        <div class="row mt-3">
+            <!-- Crawler Form -->
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-search"></i> Real-time Stock Data Crawler</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">
+                            Fetch stock data directly from EastMoney API. Enter stock codes and date range.
+                        </p>
+                        
+                        <form id="crawler-form">
+                            <div class="mb-3">
+                                <label for="stock-codes" class="form-label"><strong>Stock Codes</strong></label>
+                                <textarea class="form-control" id="stock-codes" rows="3" 
+                                    placeholder="Enter stock codes (e.g., 600000, 000001, sh600519)&#10;Separate by comma, space, or newline&#10;Max 10 stocks per request"></textarea>
+                                <div class="form-text">Supports formats: 600000, sh600000, 600000.SH, bj430017</div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-6">
+                                    <div class="mb-3">
+                                        <label for="crawler-start-date" class="form-label"><strong>Start Date</strong></label>
+                                        <input type="date" class="form-control" id="crawler-start-date">
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="mb-3">
+                                        <label for="crawler-end-date" class="form-label"><strong>End Date</strong></label>
+                                        <input type="date" class="form-control" id="crawler-end-date">
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="d-grid gap-2">
+                                <button type="button" class="btn btn-success btn-lg" id="crawler-btn" onclick="startCrawler()">
+                                    <i class="bi bi-cloud-arrow-down"></i> Fetch Data
+                                </button>
+                            </div>
+                        </form>
+                        
+                        <div id="crawler-status" class="mt-3" style="display: none;">
+                            <div class="progress">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar" style="width: 100%"></div>
+                            </div>
+                            <p class="text-center mt-2" id="crawler-message">Fetching data...</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-info-circle"></i> Quick Stock Lookup</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="validate-code" placeholder="Enter a stock code">
+                            <button class="btn btn-outline-secondary" type="button" onclick="validateCode()">
+                                <i class="bi bi-check-circle"></i> Validate
+                            </button>
+                        </div>
+                        <div id="validate-result" class="mt-2"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Crawler Result -->
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-table"></i> Crawled Data</h5>
+                        <div>
+                            <button class="btn btn-sm btn-outline-primary" onclick="exportCrawledData()" id="export-btn" disabled>
+                                <i class="bi bi-download"></i> Export CSV
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="crawler-result">
+                            <p class="text-muted text-center">Enter stock codes and click "Fetch Data" to retrieve real-time data</p>
+                        </div>
+                        
+                        <!-- Data Summary -->
+                        <div id="data-summary" style="display: none;" class="mt-3">
+                            <div class="alert alert-info">
+                                <div class="row">
+                                    <div class="col-auto">
+                                        <strong>Stocks Fetched:</strong> <span id="summary-stocks">0</span>
+                                    </div>
+                                    <div class="col-auto">
+                                        <strong>Total Records:</strong> <span id="summary-records">0</span>
+                                    </div>
+                                    <div class="col-auto">
+                                        <strong>Date Range:</strong> <span id="summary-dates">-</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Stock Selector Tabs -->
+                        <div id="stock-tabs" style="display: none;">
+                            <ul class="nav nav-pills mb-3" id="stockTabList" role="tablist">
+                            </ul>
+                            <div class="tab-content" id="stockTabContent">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- End Crawler Panel -->
+</div>
+<!-- End Tab Content -->
 {% endblock %}
 
 {% block extra_js %}
 <script>
 let downloadInProgress = false;
+let crawlerInProgress = false;
+let crawledData = {};
+
+// Set default dates for crawler
+document.addEventListener('DOMContentLoaded', function() {
+    const today = new Date();
+    const oneYearAgo = new Date(today);
+    oneYearAgo.setFullYear(today.getFullYear() - 1);
+    
+    document.getElementById('crawler-end-date').value = today.toISOString().split('T')[0];
+    document.getElementById('crawler-start-date').value = oneYearAgo.toISOString().split('T')[0];
+});
 
 async function startDownload() {
     if (downloadInProgress) {
@@ -308,6 +458,267 @@ async function refreshHistory() {
     } catch (error) {
         console.error('Failed to refresh history:', error);
     }
+}
+
+// =====================
+// Crawler Functions
+// =====================
+
+async function startCrawler() {
+    if (crawlerInProgress) {
+        alert('Crawler already in progress');
+        return;
+    }
+    
+    const stockCodesInput = document.getElementById('stock-codes').value.trim();
+    const startDate = document.getElementById('crawler-start-date').value;
+    const endDate = document.getElementById('crawler-end-date').value;
+    
+    if (!stockCodesInput) {
+        alert('Please enter at least one stock code');
+        return;
+    }
+    
+    const btn = document.getElementById('crawler-btn');
+    const statusDiv = document.getElementById('crawler-status');
+    const resultDiv = document.getElementById('crawler-result');
+    const messageP = document.getElementById('crawler-message');
+    
+    crawlerInProgress = true;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Fetching...';
+    statusDiv.style.display = 'block';
+    messageP.textContent = 'Fetching data from EastMoney API...';
+    
+    resultDiv.innerHTML = `
+        <div class="alert alert-info">
+            <div class="d-flex align-items-center">
+                <div class="spinner-border spinner-border-sm me-2"></div>
+                <div>Crawling stock data...</div>
+            </div>
+        </div>
+    `;
+    
+    try {
+        const response = await fetch('/api/crawler/fetch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                stock_codes: stockCodesInput,
+                start_date: startDate,
+                end_date: endDate
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success' && data.success_count > 0) {
+            crawledData = data.data;
+            displayCrawledData(data);
+        } else {
+            let errorMsg = data.message || 'Failed to fetch data';
+            if (data.errors && data.errors.length > 0) {
+                errorMsg += '<br><br><strong>Errors:</strong><ul>';
+                data.errors.forEach(err => {
+                    errorMsg += `<li>${err.code}: ${err.error}</li>`;
+                });
+                errorMsg += '</ul>';
+            }
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-x-circle"></i> <strong>Fetch Failed</strong>
+                    <hr>
+                    <p class="mb-0">${errorMsg}</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        resultDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle"></i> <strong>Error</strong>
+                <hr>
+                <p class="mb-0">${error.message}</p>
+            </div>
+        `;
+    } finally {
+        crawlerInProgress = false;
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-cloud-arrow-down"></i> Fetch Data';
+        statusDiv.style.display = 'none';
+    }
+}
+
+function displayCrawledData(data) {
+    const resultDiv = document.getElementById('crawler-result');
+    const summaryDiv = document.getElementById('data-summary');
+    const stockTabs = document.getElementById('stock-tabs');
+    const stockTabList = document.getElementById('stockTabList');
+    const stockTabContent = document.getElementById('stockTabContent');
+    
+    // Show success message
+    let resultHtml = `
+        <div class="alert alert-success">
+            <i class="bi bi-check-circle"></i> <strong>Data Fetched Successfully!</strong>
+            <hr>
+            <p class="mb-1"><strong>Stocks fetched:</strong> ${data.success_count}</p>
+            ${data.error_count > 0 ? `<p class="mb-0 text-warning"><strong>Failed:</strong> ${data.error_count}</p>` : ''}
+        </div>
+    `;
+    resultDiv.innerHTML = resultHtml;
+    
+    // Calculate totals
+    let totalRecords = 0;
+    let minDate = null;
+    let maxDate = null;
+    const stockCodes = Object.keys(data.data);
+    
+    stockCodes.forEach(code => {
+        const stockData = data.data[code];
+        totalRecords += stockData.count;
+        if (!minDate || stockData.date_range.start < minDate) minDate = stockData.date_range.start;
+        if (!maxDate || stockData.date_range.end > maxDate) maxDate = stockData.date_range.end;
+    });
+    
+    // Update summary
+    document.getElementById('summary-stocks').textContent = stockCodes.length;
+    document.getElementById('summary-records').textContent = totalRecords;
+    document.getElementById('summary-dates').textContent = `${minDate || '-'} to ${maxDate || '-'}`;
+    summaryDiv.style.display = 'block';
+    
+    // Build stock tabs
+    stockTabList.innerHTML = '';
+    stockTabContent.innerHTML = '';
+    
+    stockCodes.forEach((code, index) => {
+        const isActive = index === 0;
+        const stockData = data.data[code];
+        
+        // Tab button
+        stockTabList.innerHTML += `
+            <li class="nav-item" role="presentation">
+                <button class="nav-link ${isActive ? 'active' : ''}" id="tab-${code}" data-bs-toggle="pill" 
+                    data-bs-target="#panel-${code}" type="button" role="tab">
+                    ${code} <span class="badge bg-secondary">${stockData.count}</span>
+                </button>
+            </li>
+        `;
+        
+        // Tab content with data table
+        let tableHtml = `
+            <div class="tab-pane fade ${isActive ? 'show active' : ''}" id="panel-${code}" role="tabpanel">
+                <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                    <table class="table table-sm table-striped table-hover">
+                        <thead class="table-dark sticky-top">
+                            <tr>
+                                <th>Date</th>
+                                <th>Open</th>
+                                <th>High</th>
+                                <th>Low</th>
+                                <th>Close</th>
+                                <th>Volume</th>
+                                <th>Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        `;
+        
+        // Show last 50 records (most recent first)
+        const records = stockData.records.slice(-50).reverse();
+        records.forEach(record => {
+            tableHtml += `
+                <tr>
+                    <td>${record.date}</td>
+                    <td>${record.open?.toFixed(2) || '-'}</td>
+                    <td>${record.high?.toFixed(2) || '-'}</td>
+                    <td>${record.low?.toFixed(2) || '-'}</td>
+                    <td>${record.close?.toFixed(2) || '-'}</td>
+                    <td>${record.volume ? (record.volume / 10000).toFixed(2) + 'w' : '-'}</td>
+                    <td>${record.amount ? (record.amount / 100000000).toFixed(2) + 'M' : '-'}</td>
+                </tr>
+            `;
+        });
+        
+        tableHtml += `
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-muted mt-2">
+                    <small>Showing last 50 records of ${stockData.count} total | 
+                    Date range: ${stockData.date_range.start} to ${stockData.date_range.end}</small>
+                </p>
+            </div>
+        `;
+        
+        stockTabContent.innerHTML += tableHtml;
+    });
+    
+    stockTabs.style.display = 'block';
+    document.getElementById('export-btn').disabled = false;
+}
+
+async function validateCode() {
+    const codeInput = document.getElementById('validate-code').value.trim();
+    const resultDiv = document.getElementById('validate-result');
+    
+    if (!codeInput) {
+        resultDiv.innerHTML = '<p class="text-danger">Please enter a stock code</p>';
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/crawler/validate-code', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stock_code: codeInput })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            const n = data.normalized;
+            resultDiv.innerHTML = `
+                <div class="small">
+                    <table class="table table-sm mb-0">
+                        <tr><td><strong>Market:</strong></td><td>${n.market_name}</td></tr>
+                        <tr><td><strong>Code:</strong></td><td>${n.pure_code}</td></tr>
+                        <tr><td><strong>Qlib Format:</strong></td><td><code>${n.qlib_format}</code></td></tr>
+                        <tr><td><strong>Suffix Format:</strong></td><td><code>${n.suffix_format}</code></td></tr>
+                    </table>
+                </div>
+            `;
+        } else {
+            resultDiv.innerHTML = `<p class="text-danger">${data.message}</p>`;
+        }
+    } catch (error) {
+        resultDiv.innerHTML = `<p class="text-danger">Error: ${error.message}</p>`;
+    }
+}
+
+function exportCrawledData() {
+    if (Object.keys(crawledData).length === 0) {
+        alert('No data to export');
+        return;
+    }
+    
+    // Combine all stock data into one CSV
+    let csvContent = 'date,symbol,open,high,low,close,volume,amount\n';
+    
+    Object.keys(crawledData).forEach(code => {
+        const records = crawledData[code].records;
+        records.forEach(record => {
+            csvContent += `${record.date},${record.symbol},${record.open},${record.high},${record.low},${record.close},${record.volume},${record.amount}\n`;
+        });
+    });
+    
+    // Create download link
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `stock_data_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
 </script>
 {% endblock %}
