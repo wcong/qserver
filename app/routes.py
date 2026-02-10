@@ -694,3 +694,288 @@ def crawler_validate_code():
             'status': 'error',
             'message': str(e)
         }), 500
+
+
+@main_bp.route('/api/crawler/merge', methods=['POST'])
+def crawler_merge_to_qlib():
+    """API endpoint to merge crawled data into existing qlib binary files."""
+    try:
+        from qlib_module.stock_crawler import StockCrawler, QlibDataMerger
+        import pandas as pd
+        
+        data = request.get_json(force=True, silent=True) or {}
+        crawled_data = data.get('crawled_data', {})
+        
+        if not crawled_data:
+            return jsonify({
+                'status': 'error',
+                'message': 'No crawled data provided'
+            }), 400
+        
+        # Get qlib data path
+        data_manager = DataManager()
+        qlib_data_path = data_manager.data_path
+        
+        # Convert the crawled data back to DataFrames
+        data_dict = {}
+        for stock_code, stock_data in crawled_data.items():
+            records = stock_data.get('records', [])
+            if records:
+                df = pd.DataFrame(records)
+                df['date'] = pd.to_datetime(df['date'])
+                data_dict[stock_code] = df
+        
+        if not data_dict:
+            return jsonify({
+                'status': 'error',
+                'message': 'No valid stock data to merge'
+            }), 400
+        
+        # Merge into qlib format
+        merger = QlibDataMerger(qlib_data_path)
+        result = merger.merge_multiple_stocks(data_dict)
+        
+        return jsonify({
+            'status': 'success',
+            'message': f"Merged {result['success_count']} stocks into qlib data",
+            'result': {
+                'success_count': result['success_count'],
+                'failed_count': result['failed_count'],
+                'total_records_added': result['total_records_added'],
+                'total_records_updated': result['total_records_updated'],
+                'status': result['status']
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+# =====================
+# Data Browser API
+# =====================
+
+@main_bp.route('/api/data/browse')
+def browse_data_folder():
+    """API endpoint to browse folders and files in cn_data directory."""
+    try:
+        import os
+        from pathlib import Path
+        
+        data_manager = DataManager()
+        base_path = Path(data_manager.data_path)
+        
+        # Get relative path from query parameter
+        rel_path = request.args.get('path', '')
+        
+        # Security: prevent path traversal
+        if '..' in rel_path:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid path'
+            }), 400
+        
+        current_path = base_path / rel_path if rel_path else base_path
+        
+        if not current_path.exists():
+            return jsonify({
+                'status': 'error',
+                'message': 'Path does not exist'
+            }), 404
+        
+        if not str(current_path.resolve()).startswith(str(base_path.resolve())):
+            return jsonify({
+                'status': 'error',
+                'message': 'Access denied'
+            }), 403
+        
+        items = []
+        
+        if current_path.is_dir():
+            for item in sorted(current_path.iterdir()):
+                item_info = {
+                    'name': item.name,
+                    'type': 'folder' if item.is_dir() else 'file',
+                    'path': str(item.relative_to(base_path)).replace('\\', '/'),
+                }
+                
+                if item.is_file():
+                    item_info['size'] = item.stat().st_size
+                    item_info['extension'] = item.suffix
+                elif item.is_dir():
+                    # Count items in folder
+                    try:
+                        item_info['item_count'] = len(list(item.iterdir()))
+                    except:
+                        item_info['item_count'] = 0
+                
+                items.append(item_info)
+        
+        # Build breadcrumb
+        breadcrumb = []
+        if rel_path:
+            parts = rel_path.split('/')
+            for i, part in enumerate(parts):
+                breadcrumb.append({
+                    'name': part,
+                    'path': '/'.join(parts[:i+1])
+                })
+        
+        return jsonify({
+            'status': 'success',
+            'current_path': rel_path or '/',
+            'breadcrumb': breadcrumb,
+            'items': items,
+            'is_root': not rel_path
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@main_bp.route('/api/data/read-bin')
+def read_bin_file():
+    """API endpoint to read and decode a qlib binary file."""
+    try:
+        import numpy as np
+        from pathlib import Path
+        
+        data_manager = DataManager()
+        base_path = Path(data_manager.data_path)
+        
+        # Get file path from query parameter
+        file_path = request.args.get('path', '')
+        offset = int(request.args.get('offset', 0))
+        limit = int(request.args.get('limit', 100))
+        
+        # Security: prevent path traversal
+        if '..' in file_path:
+            return jsonify({
+                'status': 'error',
+                'message': 'Invalid path'
+            }), 400
+        
+        full_path = base_path / file_path
+        
+        if not full_path.exists():
+            return jsonify({
+                'status': 'error',
+                'message': 'File does not exist'
+            }), 404
+        
+        if not str(full_path.resolve()).startswith(str(base_path.resolve())):
+            return jsonify({
+                'status': 'error',
+                'message': 'Access denied'
+            }), 403
+        
+        if not full_path.suffix == '.bin':
+            return jsonify({
+                'status': 'error',
+                'message': 'Only .bin files can be read'
+            }), 400
+        
+        # Read binary data as float32 (qlib format)
+        data = np.fromfile(str(full_path), dtype='float32')
+        total_count = len(data)
+        
+        # Get calendar to map indices to dates
+        calendar_file = base_path / 'calendars' / 'day.txt'
+        calendar = []
+        if calendar_file.exists():
+            with open(calendar_file, 'r') as f:
+                calendar = [line.strip() for line in f if line.strip()]
+        
+        # Get slice of data
+        end_idx = min(offset + limit, total_count)
+        data_slice = data[offset:end_idx]
+        
+        # Build records with date mapping
+        records = []
+        for i, value in enumerate(data_slice):
+            idx = offset + i
+            record = {
+                'index': idx,
+                'value': None if np.isnan(value) else round(float(value), 4),
+                'date': calendar[idx] if idx < len(calendar) else None
+            }
+            records.append(record)
+        
+        # Calculate statistics
+        valid_data = data[~np.isnan(data)]
+        stats = {
+            'total_count': total_count,
+            'valid_count': len(valid_data),
+            'nan_count': total_count - len(valid_data),
+            'min': round(float(np.min(valid_data)), 4) if len(valid_data) > 0 else None,
+            'max': round(float(np.max(valid_data)), 4) if len(valid_data) > 0 else None,
+            'mean': round(float(np.mean(valid_data)), 4) if len(valid_data) > 0 else None,
+        }
+        
+        # Find first and last valid data indices
+        valid_indices = np.where(~np.isnan(data))[0]
+        if len(valid_indices) > 0:
+            stats['first_valid_index'] = int(valid_indices[0])
+            stats['last_valid_index'] = int(valid_indices[-1])
+            stats['first_valid_date'] = calendar[valid_indices[0]] if valid_indices[0] < len(calendar) else None
+            stats['last_valid_date'] = calendar[valid_indices[-1]] if valid_indices[-1] < len(calendar) else None
+        
+        return jsonify({
+            'status': 'success',
+            'file_path': file_path,
+            'file_size': full_path.stat().st_size,
+            'offset': offset,
+            'limit': limit,
+            'records': records,
+            'stats': stats,
+            'has_more': end_idx < total_count
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@main_bp.route('/api/data/calendar')
+def get_calendar():
+    """API endpoint to get the trading calendar."""
+    try:
+        from pathlib import Path
+        
+        data_manager = DataManager()
+        base_path = Path(data_manager.data_path)
+        
+        calendar_type = request.args.get('type', 'day')
+        calendar_file = base_path / 'calendars' / f'{calendar_type}.txt'
+        
+        if not calendar_file.exists():
+            return jsonify({
+                'status': 'error',
+                'message': 'Calendar file not found'
+            }), 404
+        
+        with open(calendar_file, 'r') as f:
+            dates = [line.strip() for line in f if line.strip()]
+        
+        return jsonify({
+            'status': 'success',
+            'calendar_type': calendar_type,
+            'total_dates': len(dates),
+            'first_date': dates[0] if dates else None,
+            'last_date': dates[-1] if dates else None,
+            'dates': dates
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500

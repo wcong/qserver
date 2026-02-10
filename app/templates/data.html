@@ -22,6 +22,11 @@
             <i class="bi bi-search"></i> Real-time Crawler
         </button>
     </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="browser-tab" data-bs-toggle="tab" data-bs-target="#browser-panel" type="button" role="tab" aria-controls="browser-panel" aria-selected="false" onclick="loadBrowserRoot()">
+            <i class="bi bi-folder2-open"></i> Data Browser
+        </button>
+    </li>
 </ul>
 
 <!-- Tab Content -->
@@ -290,6 +295,9 @@
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0"><i class="bi bi-table"></i> Crawled Data</h5>
                         <div>
+                            <button class="btn btn-sm btn-outline-success me-2" onclick="mergeToQlib()" id="merge-btn" disabled>
+                                <i class="bi bi-database-add"></i> Merge to Qlib Data
+                            </button>
                             <button class="btn btn-sm btn-outline-primary" onclick="exportCrawledData()" id="export-btn" disabled>
                                 <i class="bi bi-download"></i> Export CSV
                             </button>
@@ -298,6 +306,16 @@
                     <div class="card-body">
                         <div id="crawler-result">
                             <p class="text-muted text-center">Enter stock codes and click "Fetch Data" to retrieve real-time data</p>
+                        </div>
+                        
+                        <!-- Merge Status -->
+                        <div id="merge-status" class="mt-3" style="display: none;">
+                            <div class="alert alert-warning">
+                                <div class="d-flex align-items-center">
+                                    <div class="spinner-border spinner-border-sm me-2"></div>
+                                    <div id="merge-message">Merging data into qlib format...</div>
+                                </div>
+                            </div>
                         </div>
                         
                         <!-- Data Summary -->
@@ -330,6 +348,151 @@
         </div>
     </div>
     <!-- End Crawler Panel -->
+
+    <!-- Data Browser Panel -->
+    <div class="tab-pane fade" id="browser-panel" role="tabpanel" aria-labelledby="browser-tab">
+        <div class="row mt-3">
+            <!-- File Browser -->
+            <div class="col-md-5">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-folder2-open"></i> File Browser</h5>
+                        <button class="btn btn-sm btn-outline-primary" onclick="loadBrowserRoot()">
+                            <i class="bi bi-arrow-clockwise"></i> Refresh
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <!-- Breadcrumb -->
+                        <nav aria-label="breadcrumb" id="browser-breadcrumb">
+                            <ol class="breadcrumb mb-2">
+                                <li class="breadcrumb-item">
+                                    <a href="#" onclick="browsePath(''); return false;">
+                                        <i class="bi bi-house"></i> cn_data
+                                    </a>
+                                </li>
+                            </ol>
+                        </nav>
+                        
+                        <!-- File List -->
+                        <div id="browser-loading" style="display: none;">
+                            <div class="d-flex justify-content-center py-4">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="browser-content">
+                            <div class="list-group" id="file-list" style="max-height: 500px; overflow-y: auto;">
+                                <p class="text-muted text-center py-4">Click "Refresh" or switch to this tab to load files</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Folder Info -->
+                        <div id="folder-info" class="mt-3" style="display: none;">
+                            <small class="text-muted">
+                                <span id="folder-item-count">0</span> items
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- File Content Viewer -->
+            <div class="col-md-7">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-file-binary"></i> Binary File Viewer</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="file-viewer-placeholder">
+                            <div class="text-center text-muted py-5">
+                                <i class="bi bi-file-earmark-binary" style="font-size: 3rem;"></i>
+                                <p class="mt-3">Select a .bin file to view its contents</p>
+                            </div>
+                        </div>
+                        
+                        <div id="file-viewer" style="display: none;">
+                            <!-- File Info -->
+                            <div class="alert alert-secondary mb-3">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <strong>File:</strong> <code id="viewer-filename"></code>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <strong>Size:</strong> <span id="viewer-filesize"></span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Statistics -->
+                            <div class="card mb-3">
+                                <div class="card-header py-2">
+                                    <strong><i class="bi bi-graph-up"></i> Statistics</strong>
+                                </div>
+                                <div class="card-body py-2">
+                                    <div class="row small">
+                                        <div class="col-4"><strong>Total Records:</strong> <span id="stat-total">-</span></div>
+                                        <div class="col-4"><strong>Valid Records:</strong> <span id="stat-valid">-</span></div>
+                                        <div class="col-4"><strong>NaN Records:</strong> <span id="stat-nan">-</span></div>
+                                    </div>
+                                    <div class="row small mt-1">
+                                        <div class="col-4"><strong>Min Value:</strong> <span id="stat-min">-</span></div>
+                                        <div class="col-4"><strong>Max Value:</strong> <span id="stat-max">-</span></div>
+                                        <div class="col-4"><strong>Mean:</strong> <span id="stat-mean">-</span></div>
+                                    </div>
+                                    <div class="row small mt-1">
+                                        <div class="col-6"><strong>First Valid:</strong> <span id="stat-first">-</span></div>
+                                        <div class="col-6"><strong>Last Valid:</strong> <span id="stat-last">-</span></div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Data Navigation -->
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <div>
+                                    <button class="btn btn-sm btn-outline-secondary" id="btn-first-page" onclick="goToFirstPage()">
+                                        <i class="bi bi-chevron-double-left"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" id="btn-prev-page" onclick="goToPrevPage()">
+                                        <i class="bi bi-chevron-left"></i>
+                                    </button>
+                                    <span class="mx-2" id="page-info">-</span>
+                                    <button class="btn btn-sm btn-outline-secondary" id="btn-next-page" onclick="goToNextPage()">
+                                        <i class="bi bi-chevron-right"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" id="btn-last-page" onclick="goToLastPage()">
+                                        <i class="bi bi-chevron-double-right"></i>
+                                    </button>
+                                </div>
+                                <div>
+                                    <button class="btn btn-sm btn-outline-info" onclick="jumpToValidData()">
+                                        <i class="bi bi-skip-end"></i> Jump to Valid Data
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Data Table -->
+                            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                                <table class="table table-sm table-striped table-hover">
+                                    <thead class="table-dark sticky-top">
+                                        <tr>
+                                            <th>Index</th>
+                                            <th>Date</th>
+                                            <th>Value</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="data-table-body">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- End Data Browser Panel -->
 </div>
 <!-- End Tab Content -->
 {% endblock %}
@@ -339,6 +502,13 @@
 let downloadInProgress = false;
 let crawlerInProgress = false;
 let crawledData = {};
+
+// Data Browser state
+let currentBrowserPath = '';
+let currentBinFile = '';
+let currentOffset = 0;
+let currentLimit = 100;
+let totalRecords = 0;
 
 // Set default dates for crawler
 document.addEventListener('DOMContentLoaded', function() {
@@ -654,6 +824,7 @@ function displayCrawledData(data) {
     
     stockTabs.style.display = 'block';
     document.getElementById('export-btn').disabled = false;
+    document.getElementById('merge-btn').disabled = false;
 }
 
 async function validateCode() {
@@ -719,6 +890,315 @@ function exportCrawledData() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+}
+
+async function mergeToQlib() {
+    if (Object.keys(crawledData).length === 0) {
+        alert('No data to merge. Please fetch data first.');
+        return;
+    }
+    
+    if (!confirm('This will merge the crawled data into the existing Qlib binary data files. Continue?')) {
+        return;
+    }
+    
+    const mergeBtn = document.getElementById('merge-btn');
+    const mergeStatus = document.getElementById('merge-status');
+    const mergeMessage = document.getElementById('merge-message');
+    
+    mergeBtn.disabled = true;
+    mergeBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Merging...';
+    mergeStatus.style.display = 'block';
+    mergeMessage.textContent = 'Merging data into qlib binary format...';
+    
+    try {
+        const response = await fetch('/api/crawler/merge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                crawled_data: crawledData
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            mergeStatus.innerHTML = `
+                <div class="alert alert-success">
+                    <i class="bi bi-check-circle"></i> <strong>Merge Completed!</strong>
+                    <hr>
+                    <p class="mb-1"><strong>Stocks merged:</strong> ${data.result.success_count}</p>
+                    <p class="mb-1"><strong>Records added:</strong> ${data.result.total_records_added}</p>
+                    <p class="mb-0"><strong>Records updated:</strong> ${data.result.total_records_updated}</p>
+                </div>
+            `;
+        } else {
+            mergeStatus.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-x-circle"></i> <strong>Merge Failed</strong>
+                    <hr>
+                    <p class="mb-0">${data.message || 'Unknown error'}</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        mergeStatus.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle"></i> <strong>Error</strong>
+                <hr>
+                <p class="mb-0">${error.message}</p>
+            </div>
+        `;
+    } finally {
+        mergeBtn.disabled = false;
+        mergeBtn.innerHTML = '<i class="bi bi-database-add"></i> Merge to Qlib Data';
+    }
+}
+
+// =====================
+// Data Browser Functions
+// =====================
+
+async function loadBrowserRoot() {
+    await browsePath('');
+}
+
+async function browsePath(path) {
+    currentBrowserPath = path;
+    
+    const loadingDiv = document.getElementById('browser-loading');
+    const contentDiv = document.getElementById('browser-content');
+    const fileList = document.getElementById('file-list');
+    const folderInfo = document.getElementById('folder-info');
+    
+    loadingDiv.style.display = 'block';
+    contentDiv.style.opacity = '0.5';
+    
+    try {
+        const response = await fetch(`/api/data/browse?path=${encodeURIComponent(path)}`);
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Update breadcrumb
+            updateBreadcrumb(data.breadcrumb, data.is_root);
+            
+            // Update file list
+            if (data.items.length === 0) {
+                fileList.innerHTML = '<p class="text-muted text-center py-4">Empty folder</p>';
+            } else {
+                let html = '';
+                
+                // Add parent folder link if not root
+                if (!data.is_root) {
+                    const parentPath = path.split('/').slice(0, -1).join('/');
+                    html += `
+                        <a href="#" class="list-group-item list-group-item-action" onclick="browsePath('${parentPath}'); return false;">
+                            <i class="bi bi-arrow-up-circle text-secondary me-2"></i>
+                            <strong>..</strong> (Parent folder)
+                        </a>
+                    `;
+                }
+                
+                // Sort: folders first, then files
+                const folders = data.items.filter(i => i.type === 'folder');
+                const files = data.items.filter(i => i.type === 'file');
+                
+                folders.forEach(item => {
+                    html += `
+                        <a href="#" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" 
+                           onclick="browsePath('${item.path}'); return false;">
+                            <div>
+                                <i class="bi bi-folder-fill text-warning me-2"></i>
+                                ${item.name}
+                            </div>
+                            <span class="badge bg-secondary">${item.item_count || 0} items</span>
+                        </a>
+                    `;
+                });
+                
+                files.forEach(item => {
+                    const isBin = item.extension === '.bin';
+                    const icon = isBin ? 'bi-file-binary text-info' : 'bi-file-text text-muted';
+                    const sizeStr = formatFileSize(item.size);
+                    
+                    if (isBin) {
+                        html += `
+                            <a href="#" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" 
+                               onclick="viewBinFile('${item.path}'); return false;">
+                                <div>
+                                    <i class="bi ${icon} me-2"></i>
+                                    ${item.name}
+                                </div>
+                                <span class="badge bg-info">${sizeStr}</span>
+                            </a>
+                        `;
+                    } else {
+                        html += `
+                            <div class="list-group-item d-flex justify-content-between align-items-center">
+                                <div>
+                                    <i class="bi ${icon} me-2"></i>
+                                    ${item.name}
+                                </div>
+                                <span class="badge bg-secondary">${sizeStr}</span>
+                            </div>
+                        `;
+                    }
+                });
+                
+                fileList.innerHTML = html;
+            }
+            
+            // Update folder info
+            document.getElementById('folder-item-count').textContent = data.items.length;
+            folderInfo.style.display = 'block';
+            
+        } else {
+            fileList.innerHTML = `<div class="alert alert-danger">${data.message}</div>`;
+        }
+    } catch (error) {
+        fileList.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+    } finally {
+        loadingDiv.style.display = 'none';
+        contentDiv.style.opacity = '1';
+    }
+}
+
+function updateBreadcrumb(breadcrumb, isRoot) {
+    const nav = document.getElementById('browser-breadcrumb');
+    let html = `
+        <ol class="breadcrumb mb-2">
+            <li class="breadcrumb-item ${isRoot ? 'active' : ''}">
+                ${isRoot ? '<i class="bi bi-house"></i> cn_data' : '<a href="#" onclick="browsePath(\\'\\'); return false;"><i class="bi bi-house"></i> cn_data</a>'}
+            </li>
+    `;
+    
+    breadcrumb.forEach((item, index) => {
+        const isLast = index === breadcrumb.length - 1;
+        if (isLast) {
+            html += `<li class="breadcrumb-item active">${item.name}</li>`;
+        } else {
+            html += `<li class="breadcrumb-item"><a href="#" onclick="browsePath('${item.path}'); return false;">${item.name}</a></li>`;
+        }
+    });
+    
+    html += '</ol>';
+    nav.innerHTML = html;
+}
+
+function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+}
+
+async function viewBinFile(filePath) {
+    currentBinFile = filePath;
+    currentOffset = 0;
+    await loadBinData();
+}
+
+async function loadBinData() {
+    const placeholder = document.getElementById('file-viewer-placeholder');
+    const viewer = document.getElementById('file-viewer');
+    const tableBody = document.getElementById('data-table-body');
+    
+    placeholder.style.display = 'none';
+    viewer.style.display = 'block';
+    tableBody.innerHTML = '<tr><td colspan="3" class="text-center"><div class="spinner-border spinner-border-sm"></div> Loading...</td></tr>';
+    
+    try {
+        const response = await fetch(`/api/data/read-bin?path=${encodeURIComponent(currentBinFile)}&offset=${currentOffset}&limit=${currentLimit}`);
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Update file info
+            document.getElementById('viewer-filename').textContent = currentBinFile.split('/').pop();
+            document.getElementById('viewer-filesize').textContent = formatFileSize(data.file_size);
+            
+            // Update statistics
+            document.getElementById('stat-total').textContent = data.stats.total_count.toLocaleString();
+            document.getElementById('stat-valid').textContent = data.stats.valid_count.toLocaleString();
+            document.getElementById('stat-nan').textContent = data.stats.nan_count.toLocaleString();
+            document.getElementById('stat-min').textContent = data.stats.min ?? '-';
+            document.getElementById('stat-max').textContent = data.stats.max ?? '-';
+            document.getElementById('stat-mean').textContent = data.stats.mean ?? '-';
+            document.getElementById('stat-first').textContent = data.stats.first_valid_date ? 
+                `${data.stats.first_valid_date} (#${data.stats.first_valid_index})` : '-';
+            document.getElementById('stat-last').textContent = data.stats.last_valid_date ? 
+                `${data.stats.last_valid_date} (#${data.stats.last_valid_index})` : '-';
+            
+            // Store total records for pagination
+            totalRecords = data.stats.total_count;
+            
+            // Update page info
+            const startIdx = currentOffset + 1;
+            const endIdx = Math.min(currentOffset + data.records.length, totalRecords);
+            document.getElementById('page-info').textContent = `${startIdx} - ${endIdx} of ${totalRecords}`;
+            
+            // Update navigation buttons
+            document.getElementById('btn-first-page').disabled = currentOffset === 0;
+            document.getElementById('btn-prev-page').disabled = currentOffset === 0;
+            document.getElementById('btn-next-page').disabled = !data.has_more;
+            document.getElementById('btn-last-page').disabled = !data.has_more;
+            
+            // Render table
+            let html = '';
+            data.records.forEach(record => {
+                const valueClass = record.value === null ? 'text-muted' : '';
+                const valueText = record.value !== null ? record.value : 'NaN';
+                html += `
+                    <tr>
+                        <td>${record.index}</td>
+                        <td>${record.date || '-'}</td>
+                        <td class="${valueClass}">${valueText}</td>
+                    </tr>
+                `;
+            });
+            tableBody.innerHTML = html;
+            
+        } else {
+            tableBody.innerHTML = `<tr><td colspan="3" class="text-danger">${data.message}</td></tr>`;
+        }
+    } catch (error) {
+        tableBody.innerHTML = `<tr><td colspan="3" class="text-danger">Error: ${error.message}</td></tr>`;
+    }
+}
+
+function goToFirstPage() {
+    currentOffset = 0;
+    loadBinData();
+}
+
+function goToPrevPage() {
+    currentOffset = Math.max(0, currentOffset - currentLimit);
+    loadBinData();
+}
+
+function goToNextPage() {
+    if (currentOffset + currentLimit < totalRecords) {
+        currentOffset += currentLimit;
+        loadBinData();
+    }
+}
+
+function goToLastPage() {
+    currentOffset = Math.floor((totalRecords - 1) / currentLimit) * currentLimit;
+    loadBinData();
+}
+
+async function jumpToValidData() {
+    // Fetch data to get first valid index
+    try {
+        const response = await fetch(`/api/data/read-bin?path=${encodeURIComponent(currentBinFile)}&offset=0&limit=1`);
+        const data = await response.json();
+        
+        if (data.status === 'success' && data.stats.first_valid_index !== undefined) {
+            currentOffset = Math.floor(data.stats.first_valid_index / currentLimit) * currentLimit;
+            loadBinData();
+        }
+    } catch (error) {
+        console.error('Failed to jump to valid data:', error);
+    }
 }
 </script>
 {% endblock %}

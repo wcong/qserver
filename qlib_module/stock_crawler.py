@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
+import numpy as np
 import pandas as pd
 import requests
 
@@ -359,6 +360,216 @@ class StockCrawler:
         return result
 
 
+class QlibDataMerger:
+    """
+    Merges crawled stock data into existing Qlib binary data files.
+    
+    Qlib stores data in binary format with each feature as a separate .bin file.
+    This class handles reading existing data, merging with new data, and writing back.
+    """
+    
+    # Feature mapping from crawler columns to qlib feature names
+    FEATURE_MAP = {
+        'open': 'open',
+        'high': 'high', 
+        'low': 'low',
+        'close': 'close',
+        'volume': 'volume',
+        'amount': 'amount',
+    }
+    
+    # Qlib uses float32 for binary data
+    DTYPE = 'float32'
+    
+    def __init__(self, qlib_data_path: str):
+        """
+        Initialize the merger.
+        
+        Args:
+            qlib_data_path: Path to the qlib cn_data directory
+        """
+        self.qlib_data_path = Path(qlib_data_path)
+        self.features_path = self.qlib_data_path / 'features'
+        self.calendars_path = self.qlib_data_path / 'calendars'
+        
+        # Load calendar to map dates to indices
+        self._calendar = None
+    
+    @property
+    def calendar(self) -> List[str]:
+        """Load and cache the trading calendar."""
+        if self._calendar is None:
+            calendar_file = self.calendars_path / 'day.txt'
+            if calendar_file.exists():
+                with open(calendar_file, 'r') as f:
+                    self._calendar = [line.strip() for line in f if line.strip()]
+            else:
+                self._calendar = []
+        return self._calendar
+    
+    def _get_date_index(self, date_str: str) -> int:
+        """
+        Get the index for a date in the calendar.
+        
+        Args:
+            date_str: Date in YYYY-MM-DD format
+            
+        Returns:
+            Index in the calendar, or -1 if not found
+        """
+        # Convert date format if needed
+        if isinstance(date_str, pd.Timestamp):
+            date_str = date_str.strftime('%Y-%m-%d')
+        
+        try:
+            return self.calendar.index(date_str)
+        except ValueError:
+            return -1
+    
+    def _read_bin_file(self, file_path: Path) -> np.ndarray:
+        """Read a qlib binary feature file."""
+        import numpy as np
+        if file_path.exists():
+            return np.fromfile(str(file_path), dtype=self.DTYPE)
+        return np.array([], dtype=self.DTYPE)
+    
+    def _write_bin_file(self, file_path: Path, data: np.ndarray):
+        """Write data to a qlib binary feature file."""
+        import numpy as np
+        data = data.astype(self.DTYPE)
+        data.tofile(str(file_path))
+    
+    def merge_stock_data(
+        self,
+        stock_code: str,
+        df: pd.DataFrame,
+    ) -> Dict[str, Any]:
+        """
+        Merge crawled data for a single stock into qlib format.
+        
+        Args:
+            stock_code: Stock code in qlib format (e.g., sh600000)
+            df: DataFrame with columns: date, open, high, low, close, volume, amount
+            
+        Returns:
+            Merge result dict
+        """
+        import numpy as np
+        
+        result = {
+            'stock_code': stock_code,
+            'status': 'pending',
+            'records_added': 0,
+            'records_updated': 0,
+        }
+        
+        # Get stock feature directory
+        stock_dir = self.features_path / stock_code
+        
+        if not stock_dir.exists():
+            stock_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Created new stock directory: {stock_dir}")
+        
+        if df.empty or len(self.calendar) == 0:
+            result['status'] = 'skipped'
+            result['message'] = 'Empty data or calendar'
+            return result
+        
+        # Process each feature
+        for df_col, feature_name in self.FEATURE_MAP.items():
+            if df_col not in df.columns:
+                continue
+                
+            bin_file = stock_dir / f'{feature_name}.day.bin'
+            
+            # Read existing data
+            existing_data = self._read_bin_file(bin_file)
+            
+            # Initialize full array with NaN
+            full_data = np.full(len(self.calendar), np.nan, dtype=self.DTYPE)
+            
+            # Copy existing data
+            if len(existing_data) > 0:
+                copy_len = min(len(existing_data), len(full_data))
+                full_data[:copy_len] = existing_data[:copy_len]
+            
+            # Merge new data
+            new_count = 0
+            update_count = 0
+            for _, row in df.iterrows():
+                date_val = row['date']
+                if isinstance(date_val, pd.Timestamp):
+                    date_str = date_val.strftime('%Y-%m-%d')
+                else:
+                    date_str = str(date_val)
+                
+                idx = self._get_date_index(date_str)
+                if idx >= 0 and idx < len(full_data):
+                    value = row[df_col]
+                    if pd.notna(value):
+                        if np.isnan(full_data[idx]):
+                            new_count += 1
+                        else:
+                            update_count += 1
+                        full_data[idx] = float(value)
+            
+            # Write back
+            self._write_bin_file(bin_file, full_data)
+            
+            if feature_name == 'close':  # Track stats for close feature
+                result['records_added'] = new_count
+                result['records_updated'] = update_count
+        
+        result['status'] = 'success'
+        return result
+    
+    def merge_multiple_stocks(
+        self,
+        data_dict: Dict[str, pd.DataFrame],
+    ) -> Dict[str, Any]:
+        """
+        Merge data for multiple stocks.
+        
+        Args:
+            data_dict: Dictionary mapping stock codes to DataFrames
+            
+        Returns:
+            Summary of merge results
+        """
+        result = {
+            'start_time': datetime.now().isoformat(),
+            'success_count': 0,
+            'failed_count': 0,
+            'total_records_added': 0,
+            'total_records_updated': 0,
+            'details': [],
+        }
+        
+        for stock_code, df in data_dict.items():
+            try:
+                merge_result = self.merge_stock_data(stock_code, df)
+                if merge_result['status'] == 'success':
+                    result['success_count'] += 1
+                    result['total_records_added'] += merge_result.get('records_added', 0)
+                    result['total_records_updated'] += merge_result.get('records_updated', 0)
+                else:
+                    result['failed_count'] += 1
+                result['details'].append(merge_result)
+            except Exception as e:
+                logger.error(f"Failed to merge {stock_code}: {e}")
+                result['failed_count'] += 1
+                result['details'].append({
+                    'stock_code': stock_code,
+                    'status': 'error',
+                    'message': str(e)
+                })
+        
+        result['end_time'] = datetime.now().isoformat()
+        result['status'] = 'completed' if result['failed_count'] == 0 else 'partial'
+        
+        return result
+
+
 def crawl_stock_data(
     stock_codes: List[str],
     start_date: Optional[str] = None,
@@ -379,3 +590,4 @@ def crawl_stock_data(
     """
     crawler = StockCrawler(delay=delay)
     return crawler.fetch_multiple_stocks(stock_codes, start_date, end_date)
+
