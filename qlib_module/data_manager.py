@@ -9,10 +9,11 @@ import shutil
 import stat
 import tarfile
 import tempfile
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Any
-from urllib.request import urlretrieve
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,18 @@ class DataManager:
     
     MAX_DOWNLOAD_HISTORY = 10
     
+    # Class-level download progress tracking
+    _download_progress = {
+        'status': 'idle',
+        'phase': '',
+        'downloaded_bytes': 0,
+        'total_bytes': 0,
+        'percent': 0,
+        'message': '',
+        'error': None
+    }
+    _download_lock = threading.Lock()
+    
     def __init__(self, data_path: str = None):
         """
         Initialize the DataManager.
@@ -53,15 +66,37 @@ class DataManager:
         self.data_path = data_path or os.environ.get('QLIB_DATA_PATH', DEFAULT_CN_DATA_PATH)
         self.status_file = os.path.join(os.path.dirname(self.data_path), 'data_status.json')
         self.history_file = os.path.join(os.path.dirname(self.data_path), 'download_history.json')
+        self.progress_file = os.path.join(os.path.dirname(self.data_path), 'download_progress.json')
         
         # Ensure directory exists
         os.makedirs(self.data_path, exist_ok=True)
     
+    @classmethod
+    def get_download_progress(cls) -> Dict[str, Any]:
+        """Get current download progress."""
+        with cls._download_lock:
+            return cls._download_progress.copy()
+    
+    @classmethod
+    def _update_progress(cls, **kwargs):
+        """Update download progress."""
+        with cls._download_lock:
+            cls._download_progress.update(kwargs)
+    
+    def _save_progress_to_file(self):
+        """Save current progress to file for persistence."""
+        try:
+            progress = self.get_download_progress()
+            with open(self.progress_file, 'w') as f:
+                json.dump(progress, f)
+        except Exception as e:
+            logger.warning(f"Failed to save progress file: {e}")
+    
     def download_data(self, region: str = "cn", interval: str = "day") -> Dict[str, Any]:
         """
-        Download qlib data from GitHub releases.
+        Download qlib data from GitHub releases with progress tracking.
         Downloads from: https://github.com/chenditc/investment_data/releases/latest/download/qlib_bin.tar.gz
-        Extracts to: /app/data/stock/cn_data (overrides existing data)
+        Extracts to: data/stock/cn_data (overrides existing data)
         
         Args:
             region: Data region (cn for China, us for US)
@@ -79,6 +114,18 @@ class DataManager:
             'target_path': self.data_path
         }
         
+        # Reset progress
+        self._update_progress(
+            status='downloading',
+            phase='Starting download...',
+            downloaded_bytes=0,
+            total_bytes=0,
+            percent=0,
+            message='Connecting to GitHub...',
+            error=None
+        )
+        self._save_progress_to_file()
+        
         try:
             logger.info(f"Starting data download from: {QLIB_DATA_URL}")
             logger.info(f"Target directory: {self.data_path}")
@@ -88,14 +135,51 @@ class DataManager:
                 tmp_path = tmp_file.name
             
             try:
-                # Download the file
-                logger.info("Downloading qlib_bin.tar.gz...")
-                urlretrieve(QLIB_DATA_URL, tmp_path)
+                # Download with progress tracking using requests
+                self._update_progress(phase='Downloading', message='Fetching file from GitHub...')
+                self._save_progress_to_file()
+                
+                response = requests.get(QLIB_DATA_URL, stream=True, timeout=60)
+                response.raise_for_status()
+                
+                # Get total file size
+                total_size = int(response.headers.get('content-length', 0))
+                self._update_progress(total_bytes=total_size)
+                
+                # Download with progress
+                downloaded = 0
+                chunk_size = 8192 * 4  # 32KB chunks for faster download
+                
+                with open(tmp_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=chunk_size):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            
+                            # Update progress
+                            percent = int((downloaded / total_size * 100)) if total_size > 0 else 0
+                            self._update_progress(
+                                downloaded_bytes=downloaded,
+                                percent=percent,
+                                message=f'Downloaded {self._format_size(downloaded)} / {self._format_size(total_size)} ({percent}%)'
+                            )
+                            self._save_progress_to_file()
+                
                 logger.info(f"Download completed. File size: {os.path.getsize(tmp_path)} bytes")
+                
+                # Update progress for extraction phase
+                self._update_progress(
+                    phase='Extracting',
+                    percent=100,
+                    message='Download complete. Extracting files...'
+                )
+                self._save_progress_to_file()
                 
                 # Remove existing data directory to override
                 if os.path.exists(self.data_path):
                     logger.info(f"Removing existing data at: {self.data_path}")
+                    self._update_progress(message='Removing old data...')
+                    self._save_progress_to_file()
                     shutil.rmtree(self.data_path)
                 
                 # Create parent directory
@@ -103,6 +187,8 @@ class DataManager:
                 
                 # Extract the tar.gz file
                 logger.info(f"Extracting to: {self.data_path}")
+                self._update_progress(message='Extracting tar.gz archive...')
+                self._save_progress_to_file()
                 
                 # Use a temporary extraction directory
                 extract_tmp = os.path.join(os.path.dirname(self.data_path), '_extract_tmp')
@@ -112,6 +198,9 @@ class DataManager:
                 
                 with tarfile.open(tmp_path, 'r:gz') as tar:
                     tar.extractall(path=extract_tmp)
+                
+                self._update_progress(message='Moving files to destination...')
+                self._save_progress_to_file()
                 
                 # Check if extraction created a qlib_bin subfolder
                 extracted_items = os.listdir(extract_tmp)
@@ -131,9 +220,9 @@ class DataManager:
                 if os.path.exists(extract_tmp):
                     shutil.rmtree(extract_tmp)
                 
-                
-                
                 # Make data readable for everyone (chmod -R a+r)
+                self._update_progress(message='Setting file permissions...')
+                self._save_progress_to_file()
                 self._make_readable(self.data_path)
                 
                 result['status'] = 'completed'
@@ -145,22 +234,63 @@ class DataManager:
                 result['files_count'] = file_count
                 logger.info(f"Extraction completed. Total files: {file_count}")
                 
+                # Update final progress
+                self._update_progress(
+                    status='completed',
+                    phase='Complete',
+                    message=f'Successfully downloaded and extracted {file_count} files'
+                )
+                self._save_progress_to_file()
+                
             finally:
                 # Clean up temporary file
                 if os.path.exists(tmp_path):
                     os.unlink(tmp_path)
                     logger.info("Cleaned up temporary download file")
             
-        except Exception as e:
+        except requests.exceptions.Timeout:
+            error_msg = "Download timed out. Please try again."
             result['status'] = 'failed'
-            result['message'] = str(e)
+            result['message'] = error_msg
+            result['end_time'] = datetime.now().isoformat()
+            logger.error(f"Data download failed: {error_msg}")
+            self._update_progress(status='failed', phase='Error', message=error_msg, error=error_msg)
+            self._save_progress_to_file()
+            
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Network error: {str(e)}"
+            result['status'] = 'failed'
+            result['message'] = error_msg
+            result['end_time'] = datetime.now().isoformat()
+            logger.error(f"Data download failed: {error_msg}")
+            self._update_progress(status='failed', phase='Error', message=error_msg, error=error_msg)
+            self._save_progress_to_file()
+            
+        except Exception as e:
+            error_msg = str(e)
+            result['status'] = 'failed'
+            result['message'] = error_msg
             result['end_time'] = datetime.now().isoformat()
             logger.error(f"Data download failed: {e}")
+            self._update_progress(status='failed', phase='Error', message=error_msg, error=error_msg)
+            self._save_progress_to_file()
         
         # Update status file
         self._update_status(result)
         
         return result
+    
+    @staticmethod
+    def _format_size(size_bytes: int) -> str:
+        """Format bytes to human readable string."""
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f} KB"
+        elif size_bytes < 1024 * 1024 * 1024:
+            return f"{size_bytes / (1024 * 1024):.1f} MB"
+        else:
+            return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
     
     def _make_readable(self, path: str):
         """

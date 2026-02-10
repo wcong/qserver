@@ -520,6 +520,8 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('crawler-start-date').value = oneYearAgo.toISOString().split('T')[0];
 });
 
+let progressPollInterval = null;
+
 async function startDownload() {
     if (downloadInProgress) {
         alert('Download already in progress');
@@ -534,23 +536,28 @@ async function startDownload() {
     const statusDiv = document.getElementById('download-status');
     const resultDiv = document.getElementById('download-result');
     const messageP = document.getElementById('download-message');
+    const progressBar = statusDiv.querySelector('.progress-bar');
     
     downloadInProgress = true;
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Downloading...';
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starting...';
     statusDiv.style.display = 'block';
-    messageP.textContent = 'Downloading data... This may take several minutes.';
+    messageP.textContent = 'Initializing download...';
+    progressBar.style.width = '0%';
+    progressBar.classList.remove('bg-success', 'bg-danger');
+    progressBar.classList.add('progress-bar-animated');
     
     resultDiv.innerHTML = `
         <div class="alert alert-info">
             <div class="d-flex align-items-center">
                 <div class="spinner-border spinner-border-sm me-2"></div>
-                <div>Download in progress...</div>
+                <div>Starting download...</div>
             </div>
         </div>
     `;
     
     try {
+        // Start the download
         const response = await fetch('/api/data/download', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
@@ -558,27 +565,18 @@ async function startDownload() {
         
         const data = await response.json();
         
-        if (data.status === 'success' && data.result.status === 'completed') {
-            resultDiv.innerHTML = `
-                <div class="alert alert-success">
-                    <i class="bi bi-check-circle"></i> <strong>Download Completed!</strong>
-                    <hr>
-                    <p class="mb-1"><strong>Files:</strong> ${data.result.files_count || 'N/A'}</p>
-                    <p class="mb-1"><strong>Start:</strong> ${data.result.start_time || 'N/A'}</p>
-                    <p class="mb-0"><strong>End:</strong> ${data.result.end_time || 'N/A'}</p>
-                </div>
-            `;
-            // Refresh the page to update status
-            setTimeout(() => location.reload(), 2000);
+        if (data.status === 'success') {
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Downloading...';
+            
+            // Start polling for progress
+            progressPollInterval = setInterval(async () => {
+                await pollDownloadProgress(statusDiv, resultDiv, messageP, progressBar, btn);
+            }, 500);
+            
         } else {
-            resultDiv.innerHTML = `
-                <div class="alert alert-danger">
-                    <i class="bi bi-x-circle"></i> <strong>Download Failed</strong>
-                    <hr>
-                    <p class="mb-0">${data.result?.message || data.message || 'Unknown error'}</p>
-                </div>
-            `;
+            throw new Error(data.message || 'Failed to start download');
         }
+        
     } catch (error) {
         resultDiv.innerHTML = `
             <div class="alert alert-danger">
@@ -587,12 +585,102 @@ async function startDownload() {
                 <p class="mb-0">${error.message}</p>
             </div>
         `;
-    } finally {
-        downloadInProgress = false;
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-download"></i> Download Latest Data';
-        statusDiv.style.display = 'none';
+        resetDownloadUI(btn, statusDiv);
     }
+}
+
+async function pollDownloadProgress(statusDiv, resultDiv, messageP, progressBar, btn) {
+    try {
+        const response = await fetch('/api/data/download/progress');
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            const progress = data.progress;
+            
+            // Update progress bar
+            progressBar.style.width = `${progress.percent}%`;
+            messageP.textContent = progress.message || 'Downloading...';
+            
+            // Update result div with detailed progress
+            if (progress.status === 'downloading') {
+                const downloadedMB = (progress.downloaded_bytes / (1024 * 1024)).toFixed(1);
+                const totalMB = (progress.total_bytes / (1024 * 1024)).toFixed(1);
+                
+                resultDiv.innerHTML = `
+                    <div class="alert alert-info">
+                        <h6><i class="bi bi-cloud-download"></i> ${progress.phase}</h6>
+                        <p class="mb-2">${progress.message}</p>
+                        ${progress.total_bytes > 0 ? `
+                            <div class="progress mb-2" style="height: 25px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                     role="progressbar" 
+                                     style="width: ${progress.percent}%"
+                                     aria-valuenow="${progress.percent}" 
+                                     aria-valuemin="0" 
+                                     aria-valuemax="100">
+                                    ${progress.percent}%
+                                </div>
+                            </div>
+                            <small class="text-muted">
+                                Downloaded: ${downloadedMB} MB / ${totalMB} MB
+                            </small>
+                        ` : ''}
+                    </div>
+                `;
+            } else if (progress.status === 'completed') {
+                // Download completed
+                clearInterval(progressPollInterval);
+                progressPollInterval = null;
+                
+                progressBar.classList.remove('progress-bar-animated');
+                progressBar.classList.add('bg-success');
+                progressBar.style.width = '100%';
+                
+                resultDiv.innerHTML = `
+                    <div class="alert alert-success">
+                        <i class="bi bi-check-circle"></i> <strong>Download Completed!</strong>
+                        <hr>
+                        <p class="mb-0">${progress.message}</p>
+                    </div>
+                `;
+                
+                resetDownloadUI(btn, statusDiv);
+                
+                // Refresh the page to update status after 2 seconds
+                setTimeout(() => location.reload(), 2000);
+                
+            } else if (progress.status === 'failed') {
+                // Download failed
+                clearInterval(progressPollInterval);
+                progressPollInterval = null;
+                
+                progressBar.classList.remove('progress-bar-animated');
+                progressBar.classList.add('bg-danger');
+                
+                resultDiv.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="bi bi-x-circle"></i> <strong>Download Failed</strong>
+                        <hr>
+                        <p class="mb-0">${progress.error || progress.message || 'Unknown error'}</p>
+                    </div>
+                `;
+                
+                resetDownloadUI(btn, statusDiv);
+            }
+        }
+    } catch (error) {
+        console.error('Error polling progress:', error);
+    }
+}
+
+function resetDownloadUI(btn, statusDiv) {
+    downloadInProgress = false;
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-download"></i> Download Latest Data';
+    // Don't hide status div immediately so user can see final status
+    setTimeout(() => {
+        statusDiv.style.display = 'none';
+    }, 3000);
 }
 
 async function refreshHistory() {

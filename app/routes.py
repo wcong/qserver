@@ -314,13 +314,42 @@ def data_status():
 @main_bp.route('/api/data/download', methods=['POST'])
 def download_data():
     """API endpoint to manually trigger data download."""
+    import threading
+    
+    def run_download():
+        try:
+            data_manager = DataManager()
+            data_manager.download_data()
+        except Exception as e:
+            logger = __import__('logging').getLogger(__name__)
+            logger.error(f"Download failed: {e}")
+    
+    # Check if download is already in progress
+    progress = DataManager.get_download_progress()
+    if progress['status'] == 'downloading':
+        return jsonify({
+            'status': 'error',
+            'message': 'Download already in progress'
+        }), 400
+    
+    # Start download in background thread
+    thread = threading.Thread(target=run_download, daemon=True)
+    thread.start()
+    
+    return jsonify({
+        'status': 'success',
+        'message': 'Download started in background'
+    })
+
+
+@main_bp.route('/api/data/download/progress')
+def download_progress():
+    """API endpoint to get current download progress."""
     try:
-        data_manager = DataManager()
-        result = data_manager.download_data()
+        progress = DataManager.get_download_progress()
         return jsonify({
             'status': 'success',
-            'message': 'Data download initiated',
-            'result': result
+            'progress': progress
         })
     except Exception as e:
         return jsonify({
