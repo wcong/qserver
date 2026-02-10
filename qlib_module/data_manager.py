@@ -10,6 +10,7 @@ import stat
 import tarfile
 import tempfile
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Optional, Any
 from urllib.request import urlretrieve
 
@@ -17,7 +18,24 @@ logger = logging.getLogger(__name__)
 
 # Data download URL
 QLIB_DATA_URL = "https://github.com/chenditc/investment_data/releases/latest/download/qlib_bin.tar.gz"
-DEFAULT_CN_DATA_PATH = "/app/data/stock/cn_data"
+
+# Default data path - relative to project root
+# In Docker: /app/data/stock/cn_data
+# Locally: ./data/stock/cn_data (relative to project root)
+def get_default_cn_data_path():
+    """Get the default cn_data path, handling both Docker and local environments."""
+    # Check if running in Docker (typically /app is the workdir)
+    if os.path.exists('/app') and os.getcwd().startswith('/app'):
+        return '/app/data/stock/cn_data'
+    
+    # For local development, use path relative to the project root
+    # Find project root by looking for known files/folders
+    current_file = Path(__file__).resolve()
+    project_root = current_file.parent.parent  # qlib_module -> project root
+    
+    return str(project_root / 'data' / 'stock' / 'cn_data')
+
+DEFAULT_CN_DATA_PATH = get_default_cn_data_path()
 
 
 class DataManager:
