@@ -789,7 +789,7 @@ def crawler_merge_to_qlib():
 
 @main_bp.route('/api/data/browse')
 def browse_data_folder():
-    """API endpoint to browse folders and files in cn_data directory."""
+    """API endpoint to browse folders and files in cn_data directory with pagination."""
     try:
         import os
         from pathlib import Path
@@ -799,6 +799,10 @@ def browse_data_folder():
         
         # Get relative path from query parameter
         rel_path = request.args.get('path', '')
+        
+        # Pagination parameters
+        offset = int(request.args.get('offset', 0))
+        limit = int(request.args.get('limit', 10))
         
         # Security: prevent path traversal
         if '..' in rel_path:
@@ -821,10 +825,13 @@ def browse_data_folder():
                 'message': 'Access denied'
             }), 403
         
-        items = []
+        all_items = []
         
         if current_path.is_dir():
-            for item in sorted(current_path.iterdir()):
+            # Get all items sorted by name (ascending)
+            sorted_items = sorted(current_path.iterdir(), key=lambda x: x.name.lower())
+            
+            for item in sorted_items:
                 item_info = {
                     'name': item.name,
                     'type': 'folder' if item.is_dir() else 'file',
@@ -841,7 +848,12 @@ def browse_data_folder():
                     except:
                         item_info['item_count'] = 0
                 
-                items.append(item_info)
+                all_items.append(item_info)
+        
+        # Apply pagination
+        total_items = len(all_items)
+        paginated_items = all_items[offset:offset + limit]
+        has_more = (offset + limit) < total_items
         
         # Build breadcrumb
         breadcrumb = []
@@ -857,8 +869,12 @@ def browse_data_folder():
             'status': 'success',
             'current_path': rel_path or '/',
             'breadcrumb': breadcrumb,
-            'items': items,
-            'is_root': not rel_path
+            'items': paginated_items,
+            'is_root': not rel_path,
+            'total_items': total_items,
+            'offset': offset,
+            'limit': limit,
+            'has_more': has_more
         })
         
     except Exception as e:

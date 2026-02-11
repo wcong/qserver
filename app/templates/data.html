@@ -526,6 +526,14 @@ let currentOffset = 0;
 let currentLimit = 100;
 let totalRecords = 0;
 
+// File Browser pagination state
+let browserOffset = 0;
+let browserLimit = 10;
+let browserTotalItems = 0;
+let browserHasMore = false;
+let browserIsRoot = false;
+let browserItems = []; // Store all loaded items
+
 // Set default dates for crawler
 document.addEventListener('DOMContentLoaded', function() {
     const today = new Date();
@@ -1093,7 +1101,13 @@ async function goToManualPath() {
     }
 }
 
-async function browsePath(path) {
+async function browsePath(path, append = false) {
+    // If not appending, reset pagination
+    if (!append) {
+        browserOffset = 0;
+        browserItems = [];
+    }
+    
     currentBrowserPath = path;
     
     // Update the manual path input to show current path
@@ -1108,81 +1122,28 @@ async function browsePath(path) {
     contentDiv.style.opacity = '0.5';
     
     try {
-        const response = await fetch(`/api/data/browse?path=${encodeURIComponent(path)}`);
+        const response = await fetch(`/api/data/browse?path=${encodeURIComponent(path)}&offset=${browserOffset}&limit=${browserLimit}`);
         const data = await response.json();
         
         if (data.status === 'success') {
-            // Update breadcrumb
-            updateBreadcrumb(data.breadcrumb, data.is_root);
+            // Update pagination state
+            browserIsRoot = data.is_root;
+            browserTotalItems = data.total_items;
+            browserHasMore = data.has_more;
             
-            // Update file list
-            if (data.items.length === 0) {
-                fileList.innerHTML = '<p class="text-muted text-center py-4">Empty folder</p>';
-            } else {
-                let html = '';
-                
-                // Add parent folder link if not root
-                if (!data.is_root) {
-                    const parentPath = path.split('/').slice(0, -1).join('/');
-                    html += `
-                        <a href="#" class="list-group-item list-group-item-action" onclick="browsePath('${parentPath}'); return false;">
-                            <i class="bi bi-arrow-up-circle text-secondary me-2"></i>
-                            <strong>..</strong> (Parent folder)
-                        </a>
-                    `;
-                }
-                
-                // Sort: folders first, then files
-                const folders = data.items.filter(i => i.type === 'folder');
-                const files = data.items.filter(i => i.type === 'file');
-                
-                folders.forEach(item => {
-                    html += `
-                        <a href="#" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" 
-                           onclick="browsePath('${item.path}'); return false;">
-                            <div>
-                                <i class="bi bi-folder-fill text-warning me-2"></i>
-                                ${item.name}
-                            </div>
-                            <span class="badge bg-secondary">${item.item_count || 0} items</span>
-                        </a>
-                    `;
-                });
-                
-                files.forEach(item => {
-                    const isBin = item.extension === '.bin';
-                    const icon = isBin ? 'bi-file-binary text-info' : 'bi-file-text text-muted';
-                    const sizeStr = formatFileSize(item.size);
-                    
-                    if (isBin) {
-                        html += `
-                            <a href="#" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" 
-                               onclick="viewBinFile('${item.path}'); return false;">
-                                <div>
-                                    <i class="bi ${icon} me-2"></i>
-                                    ${item.name}
-                                </div>
-                                <span class="badge bg-info">${sizeStr}</span>
-                            </a>
-                        `;
-                    } else {
-                        html += `
-                            <div class="list-group-item d-flex justify-content-between align-items-center">
-                                <div>
-                                    <i class="bi ${icon} me-2"></i>
-                                    ${item.name}
-                                </div>
-                                <span class="badge bg-secondary">${sizeStr}</span>
-                            </div>
-                        `;
-                    }
-                });
-                
-                fileList.innerHTML = html;
+            // Append new items to existing items
+            browserItems = browserItems.concat(data.items);
+            
+            // Update breadcrumb (only on initial load)
+            if (!append) {
+                updateBreadcrumb(data.breadcrumb, data.is_root);
             }
             
+            // Update file list
+            renderFileList();
+            
             // Update folder info
-            document.getElementById('folder-item-count').textContent = data.items.length;
+            document.getElementById('folder-item-count').textContent = `${browserItems.length} of ${browserTotalItems}`;
             folderInfo.style.display = 'block';
             
         } else {
@@ -1194,6 +1155,91 @@ async function browsePath(path) {
         loadingDiv.style.display = 'none';
         contentDiv.style.opacity = '1';
     }
+}
+
+function renderFileList() {
+    const fileList = document.getElementById('file-list');
+    
+    if (browserItems.length === 0) {
+        fileList.innerHTML = '<p class="text-muted text-center py-4">Empty folder</p>';
+        return;
+    }
+    
+    let html = '';
+    
+    // Add parent folder link if not root
+    if (!browserIsRoot) {
+        const parentPath = currentBrowserPath.split('/').slice(0, -1).join('/');
+        html += `
+            <a href="#" class="list-group-item list-group-item-action" onclick="browsePath('${parentPath}'); return false;">
+                <i class="bi bi-arrow-up-circle text-secondary me-2"></i>
+                <strong>..</strong> (Parent folder)
+            </a>
+        `;
+    }
+    
+    // Sort: folders first, then files
+    const folders = browserItems.filter(i => i.type === 'folder');
+    const files = browserItems.filter(i => i.type === 'file');
+    
+    folders.forEach(item => {
+        html += `
+            <a href="#" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" 
+               onclick="browsePath('${item.path}'); return false;">
+                <div>
+                    <i class="bi bi-folder-fill text-warning me-2"></i>
+                    ${item.name}
+                </div>
+                <span class="badge bg-secondary">${item.item_count || 0} items</span>
+            </a>
+        `;
+    });
+    
+    files.forEach(item => {
+        const isBin = item.extension === '.bin';
+        const icon = isBin ? 'bi-file-binary text-info' : 'bi-file-text text-muted';
+        const sizeStr = formatFileSize(item.size);
+        
+        if (isBin) {
+            html += `
+                <a href="#" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" 
+                   onclick="viewBinFile('${item.path}'); return false;">
+                    <div>
+                        <i class="bi ${icon} me-2"></i>
+                        ${item.name}
+                    </div>
+                    <span class="badge bg-info">${sizeStr}</span>
+                </a>
+            `;
+        } else {
+            html += `
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <i class="bi ${icon} me-2"></i>
+                        ${item.name}
+                    </div>
+                    <span class="badge bg-secondary">${sizeStr}</span>
+                </div>
+            `;
+        }
+    });
+    
+    // Add "Load More" button if there are more items
+    if (browserHasMore) {
+        html += `
+            <button class="list-group-item list-group-item-action text-center text-primary fw-bold" onclick="loadMoreItems()">
+                <i class="bi bi-plus-circle me-2"></i>
+                Load More (${browserTotalItems - browserItems.length} remaining)
+            </button>
+        `;
+    }
+    
+    fileList.innerHTML = html;
+}
+
+async function loadMoreItems() {
+    browserOffset += browserLimit;
+    await browsePath(currentBrowserPath, true);
 }
 
 function updateBreadcrumb(breadcrumb, isRoot) {
