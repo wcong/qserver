@@ -61,7 +61,11 @@
                                 <td><code style="font-size: 0.8rem;">{{ data_status.data_path }}</code></td>
                             </tr>
                             <tr>
-                                <td><strong>Files Count:</strong></td>
+                                <td><strong>Stocks:</strong></td>
+                                <td>{{ data_status.stocks_count or 0 }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Files (est.):</strong></td>
                                 <td>{{ data_status.files_count or 0 }}</td>
                             </tr>
                             <tr>
@@ -235,24 +239,62 @@
                         </p>
                         
                         <form id="crawler-form">
+                            <!-- Source Selection -->
                             <div class="mb-3">
+                                <label class="form-label"><strong>Stock Source</strong></label>
+                                <div class="btn-group w-100" role="group">
+                                    <input type="radio" class="btn-check" name="stock-source" id="source-manual" value="manual" checked onchange="toggleStockSource()">
+                                    <label class="btn btn-outline-primary" for="source-manual">
+                                        <i class="bi bi-pencil"></i> Manual Input
+                                    </label>
+                                    <input type="radio" class="btn-check" name="stock-source" id="source-instrument" value="instrument" onchange="toggleStockSource()">
+                                    <label class="btn btn-outline-primary" for="source-instrument">
+                                        <i class="bi bi-folder"></i> Instrument File
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <!-- Manual Stock Codes Input -->
+                            <div class="mb-3" id="manual-input-section">
                                 <label for="stock-codes" class="form-label"><strong>Stock Codes</strong></label>
                                 <textarea class="form-control" id="stock-codes" rows="3" 
                                     placeholder="Enter stock codes (e.g., 600000, 000001, sh600519)&#10;Separate by comma, space, or newline&#10;Max 10 stocks per request"></textarea>
                                 <div class="form-text">Supports formats: 600000, sh600000, 600000.SH, bj430017</div>
                             </div>
                             
+                            <!-- Instrument Selection -->
+                            <div class="mb-3" id="instrument-input-section" style="display: none;">
+                                <label for="instrument-select" class="form-label"><strong>Instrument</strong></label>
+                                <select class="form-select" id="instrument-select" onchange="loadInstrumentStocks()">
+                                    <option value="">-- Select an instrument --</option>
+                                </select>
+                                <div id="instrument-loading" style="display: none;" class="mt-2">
+                                    <span class="spinner-border spinner-border-sm"></span> Loading instruments...
+                                </div>
+                                <div id="instrument-info" class="mt-2" style="display: none;">
+                                    <div class="alert alert-info py-2 mb-0">
+                                        <small>
+                                            <strong>Stocks found:</strong> <span id="instrument-stock-count">0</span>
+                                            <span class="text-muted">(filtered by date range)</span>
+                                        </small>
+                                    </div>
+                                </div>
+                                <div class="form-text">
+                                    Loads stocks from index constituent files (CSI300, CSI500, etc.)
+                                </div>
+                            </div>
+                            
                             <div class="row">
                                 <div class="col-6">
                                     <div class="mb-3">
                                         <label for="crawler-start-date" class="form-label"><strong>Start Date</strong></label>
-                                        <input type="date" class="form-control" id="crawler-start-date">
+                                        <input type="date" class="form-control" id="crawler-start-date" onchange="onDateChange()">
                                     </div>
                                 </div>
                                 <div class="col-6">
                                     <div class="mb-3">
                                         <label for="crawler-end-date" class="form-label"><strong>End Date</strong></label>
-                                        <input type="date" class="form-control" id="crawler-end-date">
+                                        <input type="date" class="form-control" id="crawler-end-date" onchange="onDateChange()">
                                     </div>
                                 </div>
                             </div>
@@ -746,20 +788,123 @@ async function refreshHistory() {
 // Crawler Functions
 // =====================
 
+// Instrument-related state
+let selectedInstrumentStocks = [];
+
+function toggleStockSource() {
+    const source = document.querySelector('input[name="stock-source"]:checked').value;
+    const manualSection = document.getElementById('manual-input-section');
+    const instrumentSection = document.getElementById('instrument-input-section');
+    
+    if (source === 'manual') {
+        manualSection.style.display = 'block';
+        instrumentSection.style.display = 'none';
+    } else {
+        manualSection.style.display = 'none';
+        instrumentSection.style.display = 'block';
+        loadInstrumentsList();
+    }
+}
+
+async function loadInstrumentsList() {
+    const select = document.getElementById('instrument-select');
+    const loadingDiv = document.getElementById('instrument-loading');
+    
+    // Only load if not already loaded
+    if (select.options.length > 1) return;
+    
+    loadingDiv.style.display = 'block';
+    
+    try {
+        const response = await fetch('/api/instruments/list');
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // Clear and add options
+            select.innerHTML = '<option value="">-- Select an instrument --</option>';
+            data.instruments.forEach(inst => {
+                const option = document.createElement('option');
+                option.value = inst.name;
+                option.textContent = `${inst.name.toUpperCase()} (${inst.stocks_count} entries)`;
+                select.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('Failed to load instruments:', error);
+    } finally {
+        loadingDiv.style.display = 'none';
+    }
+}
+
+async function loadInstrumentStocks() {
+    const instrument = document.getElementById('instrument-select').value;
+    const startDate = document.getElementById('crawler-start-date').value;
+    const endDate = document.getElementById('crawler-end-date').value;
+    const infoDiv = document.getElementById('instrument-info');
+    const countSpan = document.getElementById('instrument-stock-count');
+    
+    if (!instrument) {
+        infoDiv.style.display = 'none';
+        selectedInstrumentStocks = [];
+        return;
+    }
+    
+    try {
+        let url = `/api/instruments/stocks?instrument=${encodeURIComponent(instrument)}`;
+        if (startDate) url += `&start_date=${startDate}`;
+        if (endDate) url += `&end_date=${endDate}`;
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            selectedInstrumentStocks = data.stocks;
+            countSpan.textContent = data.count;
+            infoDiv.style.display = 'block';
+        } else {
+            infoDiv.style.display = 'none';
+            selectedInstrumentStocks = [];
+        }
+    } catch (error) {
+        console.error('Failed to load instrument stocks:', error);
+        selectedInstrumentStocks = [];
+    }
+}
+
+function onDateChange() {
+    // Reload instrument stocks when dates change (if instrument source is selected)
+    const source = document.querySelector('input[name="stock-source"]:checked').value;
+    if (source === 'instrument') {
+        loadInstrumentStocks();
+    }
+}
+
 async function startCrawler() {
     if (crawlerInProgress) {
         alert('Crawler already in progress');
         return;
     }
     
-    const stockCodesInput = document.getElementById('stock-codes').value.trim();
+    const source = document.querySelector('input[name="stock-source"]:checked').value;
+    let stockCodesInput;
+    
+    if (source === 'manual') {
+        stockCodesInput = document.getElementById('stock-codes').value.trim();
+        if (!stockCodesInput) {
+            alert('Please enter at least one stock code');
+            return;
+        }
+    } else {
+        // Instrument source
+        if (selectedInstrumentStocks.length === 0) {
+            alert('Please select an instrument with stocks');
+            return;
+        }
+        stockCodesInput = selectedInstrumentStocks.join(',');
+    }
+    
     const startDate = document.getElementById('crawler-start-date').value;
     const endDate = document.getElementById('crawler-end-date').value;
-    
-    if (!stockCodesInput) {
-        alert('Please enter at least one stock code');
-        return;
-    }
     
     const btn = document.getElementById('crawler-btn');
     const statusDiv = document.getElementById('crawler-status');
@@ -770,13 +915,15 @@ async function startCrawler() {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Fetching...';
     statusDiv.style.display = 'block';
-    messageP.textContent = 'Fetching data from EastMoney API...';
+    
+    const stockCount = source === 'manual' ? 'stocks' : `${selectedInstrumentStocks.length} stocks`;
+    messageP.textContent = `Fetching data for ${stockCount} from EastMoney API...`;
     
     resultDiv.innerHTML = `
         <div class="alert alert-info">
             <div class="d-flex align-items-center">
                 <div class="spinner-border spinner-border-sm me-2"></div>
-                <div>Crawling stock data...</div>
+                <div>Crawling stock data... (${source === 'instrument' ? selectedInstrumentStocks.length + ' stocks' : 'processing'})</div>
             </div>
         </div>
     `;
@@ -788,7 +935,8 @@ async function startCrawler() {
             body: JSON.stringify({
                 stock_codes: stockCodesInput,
                 start_date: startDate,
-                end_date: endDate
+                end_date: endDate,
+                source: source
             })
         });
         
@@ -1041,7 +1189,8 @@ async function mergeToQlib() {
                     <hr>
                     <p class="mb-1"><strong>Stocks merged:</strong> ${data.result.success_count}</p>
                     <p class="mb-1"><strong>Records added:</strong> ${data.result.total_records_added}</p>
-                    <p class="mb-0"><strong>Records updated:</strong> ${data.result.total_records_updated}</p>
+                    <p class="mb-1"><strong>Records updated:</strong> ${data.result.total_records_updated}</p>
+                    <p class="mb-0"><strong>New calendar dates:</strong> ${data.result.total_dates_added || 0}</p>
                 </div>
             `;
         } else {
@@ -1184,13 +1333,10 @@ function renderFileList() {
     
     folders.forEach(item => {
         html += `
-            <a href="#" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" 
+            <a href="#" class="list-group-item list-group-item-action" 
                onclick="browsePath('${item.path}'); return false;">
-                <div>
-                    <i class="bi bi-folder-fill text-warning me-2"></i>
-                    ${item.name}
-                </div>
-                <span class="badge bg-secondary">${item.item_count || 0} items</span>
+                <i class="bi bi-folder-fill text-warning me-2"></i>
+                ${item.name}
             </a>
         `;
     });

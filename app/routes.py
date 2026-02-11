@@ -549,6 +549,144 @@ def training_combinations():
 # Stock Crawler API
 # =====================
 
+@main_bp.route('/api/instruments/list')
+def list_instruments():
+    """API endpoint to list available instrument files."""
+    try:
+        data_manager = DataManager()
+        instruments_path = os.path.join(data_manager.data_path, 'instruments')
+        
+        if not os.path.exists(instruments_path):
+            return jsonify({
+                'status': 'error',
+                'message': 'Instruments folder not found'
+            }), 404
+        
+        instruments = []
+        for entry in os.scandir(instruments_path):
+            if entry.is_file() and entry.name.endswith('.txt'):
+                name = entry.name.replace('.txt', '')
+                # Count lines (stocks) in file
+                try:
+                    with open(entry.path, 'r') as f:
+                        line_count = sum(1 for line in f if line.strip())
+                except:
+                    line_count = 0
+                
+                instruments.append({
+                    'name': name,
+                    'filename': entry.name,
+                    'stocks_count': line_count
+                })
+        
+        # Sort by name
+        instruments.sort(key=lambda x: x['name'])
+        
+        return jsonify({
+            'status': 'success',
+            'instruments': instruments
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@main_bp.route('/api/instruments/stocks')
+def get_instrument_stocks():
+    """API endpoint to get stock codes from an instrument file for a given date range."""
+    try:
+        from datetime import datetime
+        
+        instrument = request.args.get('instrument', '')
+        start_date = request.args.get('start_date', '')
+        end_date = request.args.get('end_date', '')
+        
+        if not instrument:
+            return jsonify({
+                'status': 'error',
+                'message': 'Instrument name is required'
+            }), 400
+        
+        data_manager = DataManager()
+        instrument_file = os.path.join(data_manager.data_path, 'instruments', f'{instrument}.txt')
+        
+        if not os.path.exists(instrument_file):
+            return jsonify({
+                'status': 'error',
+                'message': f'Instrument file not found: {instrument}'
+            }), 404
+        
+        # Parse the instrument file
+        # Format: STOCK_CODE\tSTART_DATE\tEND_DATE
+        stocks = set()  # Use set to avoid duplicates
+        
+        # Parse user-provided dates
+        if start_date:
+            try:
+                query_start = datetime.strptime(start_date, '%Y-%m-%d')
+            except:
+                query_start = None
+        else:
+            query_start = None
+            
+        if end_date:
+            try:
+                query_end = datetime.strptime(end_date, '%Y-%m-%d')
+            except:
+                query_end = None
+        else:
+            query_end = None
+        
+        with open(instrument_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                parts = line.split('\t')
+                if len(parts) >= 3:
+                    stock_code = parts[0]
+                    stock_start = parts[1]
+                    stock_end = parts[2]
+                    
+                    # Filter by date range if provided
+                    # Stock is valid if its active period overlaps with query period
+                    if query_start or query_end:
+                        try:
+                            s_start = datetime.strptime(stock_start, '%Y-%m-%d')
+                            s_end = datetime.strptime(stock_end, '%Y-%m-%d')
+                            
+                            # Check overlap
+                            if query_end and s_start > query_end:
+                                continue  # Stock starts after query end
+                            if query_start and s_end < query_start:
+                                continue  # Stock ends before query start
+                        except:
+                            pass  # Include if date parsing fails
+                    
+                    # Convert stock code format: SZ000001 -> sz000001
+                    stock_code = stock_code.lower()
+                    stocks.add(stock_code)
+        
+        stocks_list = sorted(list(stocks))
+        
+        return jsonify({
+            'status': 'success',
+            'instrument': instrument,
+            'stocks': stocks_list,
+            'count': len(stocks_list)
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
 @main_bp.route('/api/crawler/fetch', methods=['POST'])
 def crawler_fetch():
     """API endpoint to crawl stock data in real-time."""
@@ -580,15 +718,19 @@ def crawler_fetch():
                 'message': 'Invalid stock codes format'
             }), 400
         
-        # Limit number of stocks per request
-        max_stocks = 10
+        # Check source - instrument source allows more stocks
+        source = data.get('source', 'manual')
+        max_stocks = 500 if source == 'instrument' else 10
+        
         if len(stock_codes) > max_stocks:
             return jsonify({
                 'status': 'error',
                 'message': f'Too many stock codes. Maximum {max_stocks} per request.'
             }), 400
         
-        crawler = StockCrawler(delay=0.3)
+        # Reduce delay for large batches
+        delay = 0.1 if len(stock_codes) > 20 else 0.3
+        crawler = StockCrawler(delay=delay)
         results = {}
         errors = []
         
@@ -772,6 +914,7 @@ def crawler_merge_to_qlib():
                 'failed_count': result['failed_count'],
                 'total_records_added': result['total_records_added'],
                 'total_records_updated': result['total_records_updated'],
+                'total_dates_added': result.get('total_dates_added', 0),
                 'status': result['status']
             }
         })
@@ -828,27 +971,22 @@ def browse_data_folder():
         all_items = []
         
         if current_path.is_dir():
-            # Get all items sorted by name (ascending)
-            sorted_items = sorted(current_path.iterdir(), key=lambda x: x.name.lower())
-            
-            for item in sorted_items:
-                item_info = {
-                    'name': item.name,
-                    'type': 'folder' if item.is_dir() else 'file',
-                    'path': str(item.relative_to(base_path)).replace('\\', '/'),
-                }
+            # Get all items sorted by name (ascending) - use scandir for speed
+            with os.scandir(current_path) as entries:
+                sorted_entries = sorted(entries, key=lambda x: x.name.lower())
                 
-                if item.is_file():
-                    item_info['size'] = item.stat().st_size
-                    item_info['extension'] = item.suffix
-                elif item.is_dir():
-                    # Count items in folder
-                    try:
-                        item_info['item_count'] = len(list(item.iterdir()))
-                    except:
-                        item_info['item_count'] = 0
-                
-                all_items.append(item_info)
+                for entry in sorted_entries:
+                    item_info = {
+                        'name': entry.name,
+                        'type': 'folder' if entry.is_dir() else 'file',
+                        'path': str(Path(entry.path).relative_to(base_path)).replace('\\', '/'),
+                    }
+                    
+                    if entry.is_file():
+                        item_info['size'] = entry.stat().st_size
+                        item_info['extension'] = Path(entry.name).suffix
+                    
+                    all_items.append(item_info)
         
         # Apply pagination
         total_items = len(all_items)

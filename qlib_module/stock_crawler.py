@@ -407,6 +407,44 @@ class QlibDataMerger:
                 self._calendar = []
         return self._calendar
     
+    def _save_calendar(self):
+        """Save the calendar back to file."""
+        calendar_file = self.calendars_path / 'day.txt'
+        with open(calendar_file, 'w') as f:
+            for date_str in self._calendar:
+                f.write(date_str + '\n')
+        logger.info(f"Updated calendar with {len(self._calendar)} dates")
+    
+    def _add_dates_to_calendar(self, dates: List[str]) -> int:
+        """
+        Add new dates to the calendar if they don't exist.
+        
+        Args:
+            dates: List of date strings in YYYY-MM-DD format
+            
+        Returns:
+            Number of new dates added
+        """
+        # Ensure calendar is loaded
+        _ = self.calendar
+        
+        # Find new dates
+        existing_dates = set(self._calendar)
+        new_dates = [d for d in dates if d not in existing_dates]
+        
+        if not new_dates:
+            return 0
+        
+        # Add new dates and sort
+        self._calendar.extend(new_dates)
+        self._calendar.sort()
+        
+        # Save updated calendar
+        self._save_calendar()
+        
+        logger.info(f"Added {len(new_dates)} new dates to calendar")
+        return len(new_dates)
+    
     def _get_date_index(self, date_str: str) -> int:
         """
         Get the index for a date in the calendar.
@@ -461,6 +499,7 @@ class QlibDataMerger:
             'status': 'pending',
             'records_added': 0,
             'records_updated': 0,
+            'dates_added_to_calendar': 0,
         }
         
         # Get stock feature directory
@@ -470,9 +509,28 @@ class QlibDataMerger:
             stock_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"Created new stock directory: {stock_dir}")
         
-        if df.empty or len(self.calendar) == 0:
+        if df.empty:
             result['status'] = 'skipped'
-            result['message'] = 'Empty data or calendar'
+            result['message'] = 'Empty data'
+            return result
+        
+        # Extract dates from the crawled data
+        crawled_dates = []
+        for _, row in df.iterrows():
+            date_val = row['date']
+            if isinstance(date_val, pd.Timestamp):
+                date_str = date_val.strftime('%Y-%m-%d')
+            else:
+                date_str = str(date_val)
+            crawled_dates.append(date_str)
+        
+        # Add new dates to calendar if they don't exist
+        new_dates_count = self._add_dates_to_calendar(crawled_dates)
+        result['dates_added_to_calendar'] = new_dates_count
+        
+        if len(self.calendar) == 0:
+            result['status'] = 'skipped'
+            result['message'] = 'Empty calendar'
             return result
         
         # Process each feature
@@ -485,7 +543,7 @@ class QlibDataMerger:
             # Read existing data
             existing_data = self._read_bin_file(bin_file)
             
-            # Initialize full array with NaN
+            # Initialize full array with NaN (length = calendar size)
             full_data = np.full(len(self.calendar), np.nan, dtype=self.DTYPE)
             
             # Copy existing data
@@ -542,6 +600,7 @@ class QlibDataMerger:
             'failed_count': 0,
             'total_records_added': 0,
             'total_records_updated': 0,
+            'total_dates_added': 0,
             'details': [],
         }
         
@@ -552,6 +611,7 @@ class QlibDataMerger:
                     result['success_count'] += 1
                     result['total_records_added'] += merge_result.get('records_added', 0)
                     result['total_records_updated'] += merge_result.get('records_updated', 0)
+                    result['total_dates_added'] += merge_result.get('dates_added_to_calendar', 0)
                 else:
                     result['failed_count'] += 1
                 result['details'].append(merge_result)

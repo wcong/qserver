@@ -44,6 +44,11 @@ class DataManager:
     
     MAX_DOWNLOAD_HISTORY = 10
     
+    # Class-level cache for stocks count (invalidated on data changes)
+    _stocks_count_cache = None
+    _stocks_count_cache_time = 0
+    _CACHE_TTL = 60  # Cache for 60 seconds
+    
     # Class-level download progress tracking
     _download_progress = {
         'status': 'idle',
@@ -350,29 +355,48 @@ class DataManager:
         Returns:
             Dictionary containing data status information
         """
+        import time
+        
         status = {
             'status': 'unknown',
             'data_path': self.data_path,
             'exists': os.path.exists(self.data_path),
             'files_count': 0,
+            'stocks_count': 0,
             'record_count': 0
         }
         
-        # Check if data directory exists and has files
+        # Check if data directory exists
         if os.path.exists(self.data_path):
-            files = []
-            for root, dirs, filenames in os.walk(self.data_path):
-                files.extend(filenames)
+            features_path = os.path.join(self.data_path, 'features')
+            if os.path.exists(features_path):
+                try:
+                    # Use cached count if available and not expired
+                    current_time = time.time()
+                    if (DataManager._stocks_count_cache is not None and 
+                        current_time - DataManager._stocks_count_cache_time < DataManager._CACHE_TTL):
+                        stocks_count = DataManager._stocks_count_cache
+                    else:
+                        # Count stock folders using scandir (faster than listdir + isdir)
+                        stocks_count = sum(1 for entry in os.scandir(features_path) if entry.is_dir())
+                        DataManager._stocks_count_cache = stocks_count
+                        DataManager._stocks_count_cache_time = current_time
+                    
+                    status['stocks_count'] = stocks_count
+                    status['files_count'] = stocks_count * 6  # Estimate
+                    status['status'] = 'available' if stocks_count > 0 else 'empty'
+                except OSError:
+                    status['status'] = 'empty'
+            else:
+                status['status'] = 'empty'
             
-            status['files_count'] = len(files)
-            status['status'] = 'available' if files else 'empty'
-            
-            # Try to get more detailed status
+            # Load saved status for additional info
             if os.path.exists(self.status_file):
                 try:
                     with open(self.status_file, 'r') as f:
                         saved_status = json.load(f)
-                        status.update(saved_status)
+                        if 'record_count' in saved_status:
+                            status['record_count'] = saved_status['record_count']
                 except (json.JSONDecodeError, IOError):
                     pass
         else:
